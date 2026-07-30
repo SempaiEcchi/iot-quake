@@ -4,19 +4,19 @@
 >
 > Tasks involve physical hardware and a phone hotspot. An agent can write the code and the docs; a human must flash, shake, and read the output.
 
-**Goal:** Both nodes live on the broker, publishing telemetry, with a threshold measured from your actual desk rather than guessed.
+**Goal:** The node live on the broker publishing telemetry, a threshold measured from your actual desk rather than guessed, and the cloud dashboard showing data.
 
-**Architecture:** Bring up the network first (hotspot, broker), then measure each node's real noise floor with a throwaway calibration sketch, then flash the real firmware with the measured threshold.
+**Architecture:** Bring up the network first (hotspot, broker), then measure the node's real noise floor with a throwaway calibration sketch, then flash the real firmware with the measured threshold.
 
-**Tech Stack:** mosquitto, arduino-cli, Python
+**Tech Stack:** mosquitto, arduino-cli, Python, Thingsboard
 
 ## Global Constraints
 
 See [00-index.md](00-index.md#global-constraints). Relevant here:
 
 - MQTT on port 1883, no TLS, no auth
-- Both nodes run **byte-identical** firmware — so there is one shared threshold, not two
 - `THRESHOLD_GAL` is in gal, measured, never guessed
+- `TB_TOKEN` from the environment — set in plan 03 Task 6
 
 ---
 
@@ -201,7 +201,7 @@ print(f"peak         {max(vals):.3f} gal")
 print(f"threshold    {rms * 10:.2f} gal   (10x RMS)")
 ```
 
-- [ ] **Step 3: Capture 60 seconds from node-01**
+- [ ] **Step 3: Capture 60 seconds**
 
 Put the node on the desk where it will live. **Do not touch the desk during capture** — no
 typing, no leaning. Substitute your port.
@@ -214,7 +214,7 @@ arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200 > /tmp/node01.c
 
 Wait 65 seconds, then Ctrl-C.
 
-- [ ] **Step 4: Compute node-01's noise floor**
+- [ ] **Step 4: Compute the noise floor**
 
 ```bash
 python tools/rms.py < /tmp/node01.csv
@@ -230,24 +230,24 @@ Interpreting it, for your report:
 | 3–10 gal | Building-limited. Foot traffic, HVAC, or a resonant desk dominates. Real-quake floor is higher than predicted. |
 | > 20 gal | Something is wrong — loose wiring, a fan on the desk, or the node moved. Re-seat the jumpers and recapture. |
 
-- [ ] **Step 5: Repeat for node-02**
+- [ ] **Step 5: Capture a second run to check repeatability**
+
+One 60-second sample is one sample. Repeat the capture, ideally at a different time of day —
+a quiet evening and a busy afternoon can differ by an order of magnitude if the floor is the
+dominant source.
 
 ```bash
-arduino-cli upload -p /dev/cu.usbserial-0002 --fqbn esp32:esp32:esp32 firmware/calibrate
-arduino-cli monitor -p /dev/cu.usbserial-0002 -c baudrate=115200 > /tmp/node02.csv
-python tools/rms.py < /tmp/node02.csv
+arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200 > /tmp/node01b.csv
+python tools/rms.py < /tmp/node01b.csv
 ```
 
-- [ ] **Step 6: Pick one shared threshold**
+If the two RMS figures differ by more than about 2×, the environment dominates the sensor.
+Use the **higher** value — a threshold below your worst-case noise floor fires constantly.
+Record both; the spread itself is a legitimate measured result worth a sentence in the report.
 
-The two nodes will not match — different sensor units and different spots on the desk. But
-both run byte-identical firmware, so there is one threshold.
+- [ ] **Step 6: Set the threshold**
 
-**Use 10× the *higher* of the two RMS values.** The noisier node sets the limit; a threshold
-below its noise floor would make it fire constantly and destroy the correlation rule.
-
-Record both RMS values anyway. The difference between two nominally identical sensors is a
-legitimate measured result worth a sentence in your report.
+`THRESHOLD_GAL` = 10 × the higher RMS from Steps 4–5.
 
 - [ ] **Step 7: Commit the tools**
 
@@ -276,14 +276,14 @@ Edit `firmware/node/config.h`:
 #define THRESHOLD_GAL  12.5f             // 10x the higher RMS from Task 2
 ```
 
-- [ ] **Step 2: Flash node-01**
+- [ ] **Step 2: Flash the node**
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32 firmware/node
 arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 firmware/node
 ```
 
-- [ ] **Step 3: Read node-01's serial output and record its node ID**
+- [ ] **Step 3: Read the serial output and record the node ID**
 
 ```bash
 arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
@@ -295,39 +295,35 @@ Expected:
 id=node-a4c1f8 threshold=12.5 gal
 ```
 
-Write the ID down — you need it for the test plan and the report. Ctrl-C to exit.
+Write the ID down — you need it for the Thingsboard widget in plan 03 Task 6 Step 4, the test
+plan, and the report. Ctrl-C to exit.
 
-If you see `MPU6050 not responding` and a fast-blinking LED, the wiring broke. Re-run the
-I2C scanner from plan 01 Task 4.
+If you see `MPU6050 not responding` and a fast-blinking LED, the wiring broke. Re-run the I2C
+scanner from plan 01 Task 4.
 
-- [ ] **Step 4: Flash node-02 and record its ID**
-
-Same commands, node-02's port. Same firmware, different ID.
-
-- [ ] **Step 5: Verify both nodes are publishing telemetry**
+- [ ] **Step 4: Verify the node is publishing telemetry**
 
 ```bash
 mosquitto_sub -h 127.0.0.1 -t 'quake/#' -v
 ```
 
-Expected: two distinct lines repeating about once a second:
+Expected: one line repeating about once a second:
 
 ```
 quake/node-a4c1f8/tel {"node":"node-a4c1f8","dev_gal":0.42,"uptime_s":31}
-quake/node-b7e220/tel {"node":"node-b7e220","dev_gal":0.55,"uptime_s":29}
 ```
 
 Troubleshooting, in order of likelihood:
 
 | Symptom | Cause |
 |---|---|
-| No messages at all | Nodes not on the hotspot. Check `WIFI_SSID` / `WIFI_PASSWORD` in config.h. |
+| No messages at all | Node not on the hotspot. Check `WIFI_SSID` / `WIFI_PASSWORD` in config.h. |
 | No messages, WiFi fine | Wrong `MQTT_HOST`. Re-run `ipconfig getifaddr en0` — hotspot IPs change. |
 | No messages, host right | macOS firewall blocking mosquitto (Task 1 Step 7) |
-| Only one node | The other's config.h was not re-flashed, or its USB power is dead |
+| Telemetry stops after a few seconds | Broker unreachable; the node is retrying. Check the mosquitto log. |
 | `dev_gal` huge and rising | Node is being touched, or a fan is blowing on it |
 
-- [ ] **Step 6: Verify the end-to-end path with the correlator**
+- [ ] **Step 5: Verify single-channel rejection**
 
 Broker in terminal 1, then:
 
@@ -336,30 +332,66 @@ source .venv/bin/activate
 cd correlator && python main.py --broker 127.0.0.1
 ```
 
-Expected: `connected (Success), subscribing quake/+/event`. Now tap **both** breadboards at
-once. Expected: two `event` lines, then an `ALARM` line, and the buzzer on node-01 sounds.
+Expected: `connected (Success), subscribing quake/+/event and quake/+/tel`, and
+`thingsboard connected: demo.thingsboard.io` if `TB_TOKEN` is exported.
 
-If events print but no alarm ever fires, the two taps were more than 2 s apart. Tap harder
-and closer together.
+Now tap the breadboard firmly several times. Expected: `event` lines print, the LED lights, and
+**no `ALARM`** — the buzzer stays silent. One channel is not agreement. This rejection is fully
+real and is the strongest genuine result in the project.
 
-- [ ] **Step 7: Record the results**
+- [ ] **Step 6: Verify the correlated path with the simulated channel**
+
+Third terminal:
+
+```bash
+source .venv/bin/activate
+cd correlator && python fake_node.py --broker 127.0.0.1
+```
+
+Tap the breadboard, then press Enter in the `fake_node` terminal within 2 seconds.
+
+Expected: an `event` from `node-XXXXXX`, an `event` from `sim-000001`, then
+`ALARM ['node-XXXXXX', 'sim-000001']`, and the buzzer sounds for about 1.5 s.
+
+| Symptom | Cause |
+|---|---|
+| No alarm | More than 2 s between the tap and Enter. Try again, faster. |
+| No alarm, timing was tight | The tap did not exceed the threshold — no real `event` line printed. Tap harder. |
+| Alarm but no buzzer | Node is not subscribed to `quake/alarm`, or the buzzer is miswired. Check the broker log for the alarm publish. |
+| Alarm fires with no tap at all | `fake_node.py` alone cannot alarm — it is one node. If this happens, something is republishing events; check for a stray `mosquitto_pub`. |
+
+- [ ] **Step 7: Confirm the dashboard is receiving**
+
+Open your Thingsboard dashboard. Expected: `dev_gal_node-XXXXXX` charting live, and
+`event_peak_gal` / `alarm` updating when you repeat Step 6.
+
+Add the deviation widget now if you deferred it in plan 03 Task 6 Step 4 — you have the real
+node ID as of Step 3.
+
+- [ ] **Step 8: Record the results**
 
 Create `docs/RESULTS.md`:
 
 ```markdown
 # Measured Results
 
+Hardware: one ESP32-DevKitC-32E + one MPU6050, node ID `node-XXXXXX`.
+Channel B is simulated (`sim-000001`) - see the design's Honest limitations.
+
 ## Noise floor (60 s, quiet desk, 100 Hz)
 
-| Node | ID | RMS (gal) | Peak (gal) |
+| Run | Time of day | RMS (gal) | Peak (gal) |
 |---|---|---|---|
-| node-01 | node-XXXXXX | 0.00 | 0.00 |
-| node-02 | node-XXXXXX | 0.00 | 0.00 |
+| 1 | | 0.00 | 0.00 |
+| 2 | | 0.00 | 0.00 |
 
-Shared threshold: 0.00 gal (10x the higher RMS).
+Threshold: 0.00 gal (10x the higher RMS).
 
 **Is the floor sensor-limited or building-limited?** [Fill in from the Task 2 Step 4 table.]
 The design predicted ~0.9 gal from the MPU6050's ~400 ug/sqrt(Hz) over a 0.2-5 Hz band.
+
+**Repeatability:** the two runs differed by Nx. [If more than ~2x, the environment dominates
+the sensor - say so, it is a real finding.]
 
 ## Detectable intensity
 
@@ -368,14 +400,14 @@ With a threshold of 0.00 gal, the lowest detectable shindo is [fill in].
 
 ## Captured real events
 
-| Date/time | Peak (gal) | Nodes | JMA published shindo |
+| Date/time | Peak (gal) | Channels | JMA published shindo |
 |---|---|---|---|
 | _(none yet)_ | | | |
 
 Cross-check against https://www.data.jma.go.jp/eqdb/data/shindo/
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add docs/RESULTS.md
@@ -386,8 +418,10 @@ git commit -m "docs: measured noise floor and threshold"
 
 ## Done when
 
-- `mosquitto_sub -h 127.0.0.1 -t 'quake/#' -v` shows telemetry from **two distinct** node IDs
-- Tapping both breadboards produces one `ALARM` and the buzzer sounds
+- `mosquitto_sub -h 127.0.0.1 -t 'quake/#' -v` shows telemetry from the node
+- Tapping the breadboard alone produces events but **no** alarm
+- Tapping plus an Enter on `fake_node.py` within 2 s produces one `ALARM` and the buzzer sounds
+- The Thingsboard dashboard charts live deviation
 - `docs/RESULTS.md` has real numbers, not zeros
 
 Next: [05-integration-testing.md](05-integration-testing.md)

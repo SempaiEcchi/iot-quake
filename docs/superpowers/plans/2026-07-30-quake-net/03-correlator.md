@@ -1,22 +1,25 @@
-# Plan 03: Correlator
+# Plan 03: Correlator & Simulated Node
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A service that subscribes to node events and publishes `quake/alarm` only when two distinct nodes trigger within 2 seconds.
+**Goal:** A service that publishes `quake/alarm` only when two distinct channels trigger within 2 seconds, a simulated second channel to stand in for the ESP32 you do not have, and a cloud dashboard fed by the correlator.
 
-**Architecture:** Same split as the firmware — `core.py` holds the correlation rule with no network code and takes `now` as a parameter, so tests drive time directly instead of sleeping. `main.py` is the paho-mqtt shell.
+**Architecture:** Same split as the firmware — `core.py` holds the correlation rule with no network code and takes `now` as a parameter, so tests drive time directly instead of sleeping. `main.py` is the paho-mqtt shell and the Thingsboard bridge. `fake_node.py` is channel B.
 
-**Tech Stack:** Python 3.11+, paho-mqtt 2.x, pytest
+**Tech Stack:** Python 3.11+, paho-mqtt 2.x, pytest, Thingsboard
 
-**No hardware needed.** Do this while parts ship.
+**No hardware needed.** Do all of this while parts ship.
 
 ## Global Constraints
 
 See [00-index.md](00-index.md#global-constraints). Relevant here:
 
 - Window 2.0 s, cooldown 10.0 s, `min_nodes` 2
-- Subscribes `quake/+/event`, publishes `quake/alarm`
+- Subscribes `quake/+/event` and `quake/+/tel`, publishes `quake/alarm`
 - Alarm payload `{"nodes": [...], "peak_gal": float}`
+- Simulated channel ID is `sim-000001` — the `sim-` prefix must survive, so a simulated channel
+  is never mistaken for a real one in a log or screenshot
+- `TB_TOKEN` comes from the environment. Never a tracked file, never a CLI flag.
 
 ---
 
@@ -181,7 +184,7 @@ class Correlator:
 
     A single node shaking is local noise - a truck, a door, someone leaning on
     the desk. Ground motion reaches every node. Requiring agreement is what
-    separates the two, and it is the whole point of using two nodes.
+    separates the two, and it is the whole point of requiring two channels.
     """
 
     def __init__(self, window_s: float = 2.0, cooldown_s: float = 10.0,
@@ -246,9 +249,16 @@ without sleeping."
 
 ```python
 # correlator/main.py
-"""Subscribe to node events, publish an alarm when nodes agree."""
+"""Subscribe to node events, publish an alarm when nodes agree.
+
+Also bridges to Thingsboard for the cloud dashboard. The bridge lives here
+rather than in the firmware so the node stays plaintext with no TLS, and so
+the local path - events, correlation, alarm, buzzer - keeps working when the
+internet does not.
+"""
 import argparse
 import json
+import os
 import time
 
 import paho.mqtt.client as mqtt
@@ -256,7 +266,31 @@ import paho.mqtt.client as mqtt
 from core import Correlator
 
 EVENT_SUB = "quake/+/event"
+TEL_SUB = "quake/+/tel"
 ALARM_TOPIC = "quake/alarm"
+TB_TELEMETRY = "v1/devices/me/telemetry"
+
+
+def connect_thingsboard(host: str, token: str | None):
+    """Return a connected Thingsboard client, or None to run local-only.
+
+    Thingsboard authenticates a device by using its access token as the MQTT
+    username, with no password.
+    """
+    if not token:
+        print("no TB_TOKEN set - running local-only, no cloud dashboard")
+        return None
+    tb = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    tb.username_pw_set(token)
+    try:
+        tb.connect(host, 1883, keepalive=60)
+    except OSError as e:
+        # Never let a cloud outage take down local detection.
+        print(f"thingsboard unreachable ({e}) - running local-only")
+        return None
+    tb.loop_start()
+    print(f"thingsboard connected: {host}")
+    return tb
 
 
 def main() -> None:
@@ -266,31 +300,52 @@ def main() -> None:
     ap.add_argument("--window", type=float, default=2.0)
     ap.add_argument("--cooldown", type=float, default=10.0)
     ap.add_argument("--min-nodes", type=int, default=2)
+    ap.add_argument("--tb-host", default="demo.thingsboard.io")
     args = ap.parse_args()
 
     corr = Correlator(window_s=args.window, cooldown_s=args.cooldown,
                       min_nodes=args.min_nodes)
+    tb = connect_thingsboard(args.tb_host, os.environ.get("TB_TOKEN"))
+
+    def to_cloud(fields: dict) -> None:
+        if tb:
+            tb.publish(TB_TELEMETRY, json.dumps(fields))
 
     def on_connect(client, userdata, flags, reason_code, properties):
-        print(f"connected ({reason_code}), subscribing {EVENT_SUB}")
+        print(f"connected ({reason_code}), subscribing {EVENT_SUB} and {TEL_SUB}")
         client.subscribe(EVENT_SUB)
+        client.subscribe(TEL_SUB)
 
     def on_message(client, userdata, msg):
         # Node ID comes from the topic, not the payload: the topic is set by
-        # the broker routing and cannot disagree with itself.
+        # broker routing and cannot disagree with itself.
         parts = msg.topic.split("/")
         if len(parts) != 3:
             return
-        node_id = parts[1]
+        node_id, kind = parts[1], parts[2]
 
         try:
-            peak = float(json.loads(msg.payload)["peak_gal"])
-        except (ValueError, KeyError, TypeError):
+            data = json.loads(msg.payload)
+        except ValueError:
             print(f"  ignoring malformed payload from {node_id}: {msg.payload!r}")
+            return
+
+        if kind == "tel":
+            # Per-node keys so the dashboard can chart channels separately.
+            dev = data.get("dev_gal")
+            if dev is not None:
+                to_cloud({f"dev_gal_{node_id}": dev})
+            return
+
+        try:
+            peak = float(data["peak_gal"])
+        except (ValueError, KeyError, TypeError):
+            print(f"  ignoring malformed event from {node_id}: {msg.payload!r}")
             return
 
         now = time.monotonic()
         print(f"event  {node_id}  peak={peak:.2f} gal")
+        to_cloud({"event_node": node_id, "event_peak_gal": peak})
 
         alarm = corr.add_event(node_id, peak, now)
         if alarm:
@@ -298,6 +353,8 @@ def main() -> None:
                                   "peak_gal": alarm.peak_gal})
             client.publish(ALARM_TOPIC, payload)
             print(f"ALARM  {alarm.nodes}  peak={alarm.peak_gal:.2f} gal")
+            to_cloud({"alarm": 1, "alarm_peak_gal": alarm.peak_gal,
+                      "alarm_nodes": ",".join(alarm.nodes)})
 
     # paho-mqtt 2.x requires the callback API version explicitly.
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
@@ -311,14 +368,19 @@ if __name__ == "__main__":
     main()
 ```
 
+`TB_TOKEN` comes from the environment, never a file and never a flag — flags land in your
+shell history. Without it the correlator runs local-only, which is exactly what you want if
+the venue's internet fails mid-demo.
+
 - [ ] **Step 2: Verify it starts and fails cleanly with no broker**
 
 ```bash
 cd correlator && python main.py --broker 127.0.0.1
 ```
 
-Expected: `ConnectionRefusedError`. That proves argument parsing and imports work — there is
-no broker yet. Plan 04 starts one.
+Expected: first `no TB_TOKEN set - running local-only, no cloud dashboard` (you set the token in
+Task 6), then `ConnectionRefusedError` on the local broker. That proves argument parsing and
+imports work — there is no broker yet. Plan 04 starts one.
 
 - [ ] **Step 3: Verify the unit tests are unaffected**
 
@@ -341,10 +403,181 @@ instead of crashing the service."
 
 ---
 
+### Task 5: Simulated second channel
+
+**Files:**
+- Create: `correlator/fake_node.py`
+
+Only one ESP32 is available, so channel B is simulated. It speaks the same MQTT contract, which
+means a real second node later is a drop-in with no code changes.
+
+**This script must never subscribe to the real node's events.** If it echoed them, every real
+event would auto-correlate: the alarm would become vacuous and single-node rejection could
+never be demonstrated. It publishes only when you press Enter.
+
+- [ ] **Step 1: Write the simulated node**
+
+```python
+# correlator/fake_node.py
+"""Simulated second channel. Publishes an event when you press Enter.
+
+Deliberately does NOT subscribe to any topic. If this echoed the real node's
+events, correlation would always succeed and the alarm would mean nothing -
+and the single-node rejection test would be impossible to run.
+
+The ID is prefixed 'sim-' so a simulated channel can never be mistaken for a
+real one in a log or a screenshot.
+"""
+import argparse
+import json
+import random
+import time
+
+import paho.mqtt.client as mqtt
+
+NODE_ID = "sim-000001"
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--broker", required=True)
+    ap.add_argument("--port", type=int, default=1883)
+    ap.add_argument("--peak", type=float, default=0.0,
+                    help="peak_gal to report; 0 picks a random 20-80")
+    args = ap.parse_args()
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.connect(args.broker, args.port, keepalive=60)
+    client.loop_start()
+
+    ev_topic = f"quake/{NODE_ID}/event"
+    tel_topic = f"quake/{NODE_ID}/tel"
+    started = time.monotonic()
+
+    print(f"{NODE_ID} ready. Enter = publish event, Ctrl-C = quit.")
+    print(f"  events -> {ev_topic}")
+
+    try:
+        while True:
+            input()
+            peak = args.peak or round(random.uniform(20.0, 80.0), 2)
+            client.publish(ev_topic, json.dumps({
+                "node": NODE_ID, "peak_gal": peak, "dur_ms": 1200,
+            }))
+            client.publish(tel_topic, json.dumps({
+                "node": NODE_ID, "dev_gal": peak,
+                "uptime_s": int(time.monotonic() - started),
+            }))
+            print(f"published  peak={peak:.2f} gal")
+    except KeyboardInterrupt:
+        print("\nstopping")
+        client.loop_stop()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+- [ ] **Step 2: Verify it fails cleanly with no broker**
+
+```bash
+cd correlator && python fake_node.py --broker 127.0.0.1
+```
+
+Expected: `ConnectionRefusedError`. No broker yet — plan 04 starts one.
+
+- [ ] **Step 3: Confirm it subscribes to nothing**
+
+```bash
+grep -n 'subscribe' correlator/fake_node.py || echo "correct: no subscriptions"
+```
+
+Expected: `correct: no subscriptions`. This is the guard against a vacuous alarm — if a future
+edit adds a subscription here, the whole demonstration becomes circular.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add correlator/fake_node.py
+git commit -m "feat: simulated second channel
+
+Only one ESP32 is available, so channel B is simulated. Speaks the same
+MQTT contract, so a real second node is a drop-in.
+
+Subscribes to nothing on purpose: echoing the real node's events would
+make every event auto-correlate, rendering the alarm vacuous and the
+single-node rejection test impossible."
+```
+
+---
+
+### Task 6: Thingsboard dashboard
+
+**Files:** none — this is account setup and web UI work.
+
+Thingsboard is the display sink only. The correlator forwards to it; nothing depends on it.
+
+- [ ] **Step 1: Create a device on the public demo instance**
+
+Sign up at [demo.thingsboard.io](https://demo.thingsboard.io), then **Devices → + → Add new
+device**. Name it `quake-net`. Open it, go to **Details → Copy access token**.
+
+The public demo instance deletes data periodically and is rate-limited. Fine for a course demo;
+take screenshots of your dashboard rather than relying on it to still hold your data at grading
+time.
+
+- [ ] **Step 2: Export the token into your shell**
+
+```bash
+export TB_TOKEN='paste-your-device-access-token'
+```
+
+Never put this in a file that git tracks, and never pass it as a command-line flag — flags are
+recorded in your shell history. Add it to your `~/.zshrc` if you want it to persist.
+
+- [ ] **Step 3: Verify the token works before wiring anything up**
+
+```bash
+mosquitto_pub -h demo.thingsboard.io -p 1883 -u "$TB_TOKEN" \
+  -t 'v1/devices/me/telemetry' -m '{"test":1}'
+```
+
+Expected: exits silently with status 0. Then check **Devices → quake-net → Latest telemetry**
+in the web UI for a `test` key.
+
+A `Connection Refused: not authorised` means the token is wrong or was copied with whitespace.
+
+- [ ] **Step 4: Build the dashboard**
+
+**Dashboards → + → Create new dashboard**, then add widgets bound to the `quake-net` device:
+
+| Widget | Type | Key |
+|---|---|---|
+| Live deviation | Time series chart | `dev_gal_node-XXXXXX` (your real node's ID) |
+| Last event peak | Latest values card | `event_peak_gal` |
+| Alarm state | Latest values card | `alarm`, `alarm_nodes` |
+
+You will not know your real node's ID until plan 04 Task 3, so add that first widget after
+flashing. The other two work immediately.
+
+- [ ] **Step 5: Confirm graceful degradation**
+
+```bash
+cd correlator && unset TB_TOKEN && python main.py --broker 127.0.0.1
+```
+
+Expected: `no TB_TOKEN set - running local-only, no cloud dashboard`, then a connection error
+for the local broker. The cloud must never be load-bearing — if the venue's internet dies
+mid-demo, the buzzer still has to fire.
+
+---
+
 ## Done when
 
 - `cd correlator && python -m pytest test_core.py -v` → `8 passed`
-- `python main.py --broker 127.0.0.1` fails with a connection error, not a traceback in your
-  own code
+- `python main.py --broker 127.0.0.1` fails on the *local* broker, not in your own code
+- `grep -n subscribe correlator/fake_node.py` finds nothing
+- A manual `mosquitto_pub` to Thingsboard shows up in Latest telemetry
+- With `TB_TOKEN` unset, the correlator says it is running local-only rather than crashing
 
 Next: [04-bringup-and-calibration.md](04-bringup-and-calibration.md)

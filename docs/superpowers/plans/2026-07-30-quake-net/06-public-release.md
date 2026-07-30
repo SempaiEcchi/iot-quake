@@ -36,19 +36,23 @@ git log --all --full-history --oneline -- firmware/node/config.h
 
 Expected: **no output.** Any output means the file is in history — go to Step 4.
 
-- [ ] **Step 2: Search all history for your actual password**
+- [ ] **Step 2: Search all history for your actual secrets**
 
-Substitute your real hotspot password.
-
-```bash
-git grep -I --all-match -n 'your-real-password' $(git rev-list --all) 2>/dev/null | head
-```
-
-Expected: no output. Also check the SSID:
+Substitute your real values. Three things to check: the hotspot password, the SSID, and the
+Thingsboard device token.
 
 ```bash
-git grep -I -n 'your-real-ssid' $(git rev-list --all) 2>/dev/null | head
+git grep -I -n 'your-real-password' $(git rev-list --all) 2>/dev/null | head
+git grep -I -n 'your-real-ssid'     $(git rev-list --all) 2>/dev/null | head
+git grep -I -n "$TB_TOKEN"          $(git rev-list --all) 2>/dev/null | head
 ```
+
+Expected: no output from any of them.
+
+The token should never have been near a file — it lives in `TB_TOKEN` — but check anyway. A
+leaked Thingsboard token lets anyone write telemetry to your device. If it appears, revoke it in
+the Thingsboard UI (**Devices → quake-net → Manage credentials**) rather than relying on history
+rewriting.
 
 - [ ] **Step 3: Confirm nothing sensitive is staged or untracked-but-about-to-be-added**
 
@@ -143,7 +147,7 @@ git commit -m "chore: MIT license"
 
 - [ ] **Step 1: Add the wiring photo from plan 01**
 
-Both nodes, wiring visible. Resize to about 1600 px wide so the repo stays small.
+The node with its wiring visible. Resize to about 1600 px wide so the repo stays small.
 
 ```bash
 mkdir -p docs/media
@@ -190,18 +194,20 @@ file to learn whether this worked.
 
 | Measurement | Value |
 |---|---|
-| Noise floor, node-01 | 0.00 gal RMS |
-| Noise floor, node-02 | 0.00 gal RMS |
+| Noise floor, run 1 / run 2 | 0.00 / 0.00 gal RMS |
+| Noise-floor limit | sensor / building (delete one) |
 | Threshold | 0.00 gal |
 | Lowest detectable shindo | 0 |
-| Single-node events rejected in 1 h of normal activity | 0 |
+| Single-channel events rejected in 1 h of normal activity | 0 |
 | Real earthquakes captured | 0 |
+
+One ESP32; the second channel is simulated. See [Limitations](#limitations).
 
 Full detail: [docs/RESULTS.md](docs/RESULTS.md) · [docs/TESTLOG.md](docs/TESTLOG.md)
 ```
 
-The rejection count is the headline. It is the measured value of using two nodes instead of
-one.
+The rejection count is the headline. It is the measured value of requiring agreement instead of
+trusting one channel.
 
 - [ ] **Step 3: Add a Credits section**
 
@@ -216,7 +222,7 @@ Prior art this project drew on:
 - [coniferconifer/ESP32-seismometer](https://github.com/coniferconifer/ESP32-seismometer) —
   JMA-based intensity approach and the gravity-offset filtering idea
 - [GeoShake: DIY seismology and PGA](https://geoshake.org/blog/diy-seismology-pga-geoshake) —
-  multi-sensor noise rejection, which this project reduces to two nodes
+  multi-sensor noise rejection, which this project reduces to two channels
 - [Qiita: 地震観測を目的とした加速度センサ5種の性能比較](https://qiita.com/compo031/items/e62d0a0e1425c5e1efe8) —
   accelerometer noise-floor comparison that informed the sensor choice
 - [OCW Bucharest earthquake detection project](https://ocw.cs.pub.ro/courses/iothings/proiecte/2021/earthquakedetection) —

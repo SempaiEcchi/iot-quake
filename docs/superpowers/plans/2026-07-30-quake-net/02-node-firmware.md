@@ -12,7 +12,9 @@
 
 See [00-index.md](00-index.md#global-constraints). Critical for this plan:
 
-- 100 Hz sampling, 10 000 µs period, gated on `micros()`
+- 100 Hz sampling, 10 000 µs period, gated on `micros()`, **resyncing** rather than catching up
+  when more than 10 periods behind
+- `mqtt.setSocketTimeout(2)` — PubSubClient's default blocks 15 s
 - MPU6050 at `0x68`, ±2 g, 16384 LSB/g, 1 g = 980.665 gal — **all acceleration in gal**
 - `EMA_ALPHA` 0.01, `WARMUP_MS` 3000, `REFRACTORY_MS` 5000
 - Node ID = last three MAC bytes, lowercase hex, `node-a4c1f8`
@@ -410,7 +412,7 @@ Everything here is I/O. Nothing here decides whether a shake happened.
 ```cpp
 // firmware/node/node.ino
 // Networked shake node. Samples at 100 Hz, publishes events over MQTT.
-// Both nodes run this byte-identical; the ID comes from the WiFi MAC.
+// The ID comes from the WiFi MAC, so this is drop-in for additional nodes.
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -483,7 +485,9 @@ static void on_message(char* topic, byte* payload, unsigned int len) {
   }
 }
 
-// Non-blocking. Sampling must never stall waiting for the network.
+// Near-non-blocking: mqtt.connect() still blocks, but setSocketTimeout(2)
+// caps that at ~2 s instead of PubSubClient's 15 s default, and the sample
+// gate resyncs afterwards rather than firing a catch-up burst.
 static void net_pump() {
   if (WiFi.status() != WL_CONNECTED) {
     if (millis() - last_reconnect_ms > 5000) {
@@ -535,6 +539,7 @@ void setup() {
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(on_message);
+  mqtt.setSocketTimeout(2);   // default is 15 s, which stalls loop() hard
 
   detector_init(&det, THRESHOLD_GAL);
   next_sample_us = micros();
@@ -550,7 +555,16 @@ void loop() {
 
   // 100 Hz gate. Runs regardless of network state — detection never stops.
   if ((int32_t)(micros() - next_sample_us) < 0) return;
-  next_sample_us += SAMPLE_US;
+
+  // Resync instead of catching up. A stall (a blocking reconnect, say) leaves
+  // the gate many periods behind; catching up would fire a burst of samples
+  // all stamped with nearly the same millis(), which corrupts the EMA
+  // baseline and can bypass warm-up. Dropping those samples is harmless —
+  // events are dropped during an outage anyway.
+  if ((int32_t)(micros() - next_sample_us) > 10 * SAMPLE_US)
+    next_sample_us = micros();
+  else
+    next_sample_us += SAMPLE_US;
 
   float mag;
   if (!mpu_read_mag(&mag)) return;      // skip this sample, never publish garbage
@@ -615,10 +629,16 @@ git add firmware/node/node.ino
 git commit -m "feat: node sketch - sensor, WiFi, MQTT, LED, buzzer
 
 Raw Wire register reads instead of a driver library: two fewer
-dependencies for twenty lines. Network handling is non-blocking so the
-100 Hz sample gate never stalls, and events during an outage are dropped
-rather than queued - a stale timestamp would corrupt the correlator's
-window."
+dependencies for twenty lines.
+
+PubSubClient's connect() blocks for 15 s by default when the broker is
+unreachable, and the sample gate would then catch up in a burst of
+samples all stamped with the same millis(), corrupting the EMA baseline
+and bypassing warm-up. Socket timeout is capped at 2 s and the gate
+resyncs rather than catching up.
+
+Events during an outage are dropped rather than queued - a stale
+timestamp would corrupt the correlator's window."
 ```
 
 ---

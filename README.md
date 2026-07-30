@@ -1,42 +1,63 @@
 # Networked Earthquake Detection
 
-Two ESP32 nodes, one accelerometer each, publishing shake events over MQTT. A correlator
-declares an earthquake only when both nodes agree within 2 seconds — so a passing truck
-that shakes one node is rejected, while ground motion that shakes both is not.
+An ESP32 with an accelerometer publishes shake events over MQTT. A correlator declares an
+earthquake only when two channels agree within 2 seconds — so a passing truck that shakes one
+channel is rejected, while ground motion that shakes both is not.
 
 University IoT course project. Japan.
 
-## Why two nodes
+**One ESP32, so the second channel is simulated.** `fake_node.py` speaks the same MQTT
+contract and is triggered by hand. What this project demonstrates is the protocol and the
+correlation rule end to end, not two-point physical seismology. A real second node is a
+drop-in: no code changes.
 
-A single accelerometer cannot distinguish local vibration from ground motion. Adding a
-second node and requiring agreement is the cheapest way to get that discrimination, and it
-is the approach used by real dense-array networks such as the Community Seismic Network
-and MyShake.
+## Why correlation
 
-## Parts (~¥5,100)
+A single accelerometer cannot distinguish local vibration from ground motion. Requiring two
+channels to agree is the cheapest way to get that discrimination, and it is the approach used
+by real dense-array networks such as the Community Seismic Network and MyShake.
+
+## Parts (~¥3,100)
 
 | Part | Qty | Price |
 |---|---|---|
-| [ESP32-DevKitC-32E](https://akizukidenshi.com/catalog/g/g115673/) (ESP32-WROOM-32E, 4 MB) | 2 | ¥1,800 ea |
-| MPU6050 / GY-521 accelerometer module | 2 | ~¥300 ea |
+| [ESP32-DevKitC-32E](https://akizukidenshi.com/catalog/g/g115673/) (ESP32-WROOM-32E, 4 MB) | 1 | ¥1,800 |
+| MPU6050 / GY-521 accelerometer module | 1 | ~¥300 |
 | Active buzzer module, 3-pin | 1 | ~¥100 |
-| 5 mm LED + 330 Ω resistor | 2 | ~¥30 ea |
-| Breadboard and jumper wires | 1 set | ~¥700 |
+| Breadboard | 1 | ~¥300 |
+| Jumper wires, male-male | 1 set | ~¥400 |
+| 5 mm LED + 330 Ω resistor (packs) | 1 ea | ~¥200 |
+
+In Osaka: シリコンハウス共立, 浪速区日本橋5-8-26. 秋月電子 is online-only outside Tokyo.
 
 ## Wiring
 
-Identical on both nodes. Buzzer on node-01 only.
-
 ```
 MPU6050        ESP32
-  VCC   ──────  3V3
+  VCC   ──────  3V3        <-- 3.3 V, NOT 5V
   GND   ──────  GND
   SCL   ──────  GPIO22
   SDA   ──────  GPIO21
 
 LED    ──────  GPIO26  (through 330 Ω to GND)
-Buzzer ──────  GPIO25  (node-01 only)
+Buzzer ──────  GPIO25
 ```
+
+## Architecture
+
+```
+[ESP32 + MPU6050] ──┐
+                    ├──► Mosquitto ──► correlator ──┬──► quake/alarm ──► buzzer
+[fake_node.py]    ──┘     (laptop)                  └──► Thingsboard (dashboard)
+```
+
+The broker stays local so the demo survives an internet outage — events, correlation, alarm,
+and buzzer all keep working; only the cloud dashboard goes blank. The correlator forwards to
+Thingsboard rather than the firmware doing it, which keeps the node plaintext with no TLS.
+
+Both halves split a **pure core** from a **thin shell**: `detector.cpp` has no Arduino headers
+and `core.py` has no network, so both run on your laptop against fake data and fake time.
+That is why a hardware project can have real unit tests.
 
 ## Running it
 
@@ -44,23 +65,24 @@ Buzzer ──────  GPIO25  (node-01 only)
 
    ```
    brew install mosquitto
-   mosquitto -v
+   mosquitto -c correlator/mosquitto.conf -v
+   ipconfig getifaddr en0
    ```
 
-2. Put the laptop and both nodes on the same phone hotspot. This avoids university WiFi
-   and captive portals during the demo.
+2. Put the laptop and the node on the same phone hotspot. This avoids university WiFi and
+   captive portals, and its cellular link carries the dashboard traffic.
 
-3. Flash both nodes with the same firmware — node IDs derive from the WiFi MAC, so there is
-   no per-node configuration.
+3. Copy `firmware/node/config.h.example` to `config.h`, fill in your WiFi and the broker IP,
+   then flash. `config.h` is gitignored — do not commit yours.
 
-4. Calibrate each node's threshold: log deviation on a quiet desk for 60 seconds, then set
-   the threshold to 10× the RMS you measured. The two nodes will not match; that is
-   expected.
+4. Calibrate: log deviation on a quiet desk for 60 seconds, set the threshold to 10× the RMS
+   you measure. Do not guess it.
 
-5. Run the correlator:
+5. Run the correlator, and the simulated channel in a second terminal:
 
    ```
-   python correlator.py --broker <laptop-ip>
+   python correlator/main.py --broker <laptop-ip>
+   python correlator/fake_node.py --broker <laptop-ip>
    ```
 
 ## MQTT topics
@@ -69,23 +91,34 @@ Buzzer ──────  GPIO25  (node-01 only)
 |---|---|---|
 | `quake/<node_id>/event` | node → broker | `{"node","peak_gal","dur_ms"}` on trigger |
 | `quake/<node_id>/tel` | node → broker | `{"node","dev_gal","uptime_s"}` at 1 Hz |
-| `quake/alarm` | correlator → node-01 | `{"nodes":[...],"peak_gal"}` |
+| `quake/alarm` | correlator → node | `{"nodes":[...],"peak_gal"}` |
 
-LED means this node felt something. Buzzer means the network agrees.
+LED means one channel felt something. Buzzer means the channels agree.
 
 ## Demo
 
-Tap one node: LED lights, no alarm — rejected as local noise. Shake the table both nodes
-rest on: both LEDs light, buzzer sounds, alarm appears on the dashboard.
+Shake the node with the simulated channel stopped: LED lights, event publishes, **no alarm**.
+That rejection is entirely real. Then shake it while triggering the simulated channel: LED,
+buzzer, alarm on the dashboard.
 
-## What this does not do
+## Limitations
 
-It does not locate an epicentre — that needs sub-millisecond timing, which WiFi cannot
-provide. It does not compute official JMA seismic intensity; it reports peak acceleration
-in gal. Sensor noise puts the realistic floor near shindo 3, so smaller tremors will not
-register.
+Stated up front rather than buried.
+
+- **The second channel is simulated.** Two-point physical discrimination is not demonstrated;
+  the protocol and the correlation rule are.
+- **A real earthquake will not raise an alarm.** It shakes the real node only, and the simulated
+  channel is triggered by hand, so real events are evidenced from the event log cross-checked
+  against JMA rather than from alarms.
+- **Correlation rejects only channel-local noise.** Even with a real second sensor, floor-borne
+  noise like footsteps reaches every sensor and correlates. Only amplitude rejects that.
+- **No epicentre location** — that needs sub-millisecond timing, which WiFi cannot provide.
+- **No official JMA shindo** — peak acceleration in gal only.
+- **Detection floor around shindo 3**, subject to the measured noise floor.
 
 ## Documentation
 
 - [Design](docs/superpowers/specs/2026-07-30-esp32-quake-node-design.md) — architecture,
-  detection algorithm, error handling, test plan, and the list of features deliberately cut.
+  detection algorithm, error handling, and every feature deliberately cut
+- [Build plans](docs/superpowers/plans/2026-07-30-quake-net/00-index.md) — step by step, from
+  buying parts to publishing

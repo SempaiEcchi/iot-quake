@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> Tasks 1–3 are physical actions only a human can do. An agent should stop at Task 4.
+> Tasks 1–2 are physical actions only a human can do. An agent should start at Task 3.
 
-**Goal:** Two assembled nodes whose accelerometers are confirmed responding at I2C address `0x68`.
+**Goal:** An assembled node whose accelerometer is confirmed responding at I2C address `0x68`.
 
-**Architecture:** Buy parts, wire both nodes identically on separate breadboards, install the toolchain, and prove the sensors talk before writing any real firmware.
+**Architecture:** Buy parts, wire the node, install the toolchain, and prove the sensor talks before writing any real firmware.
 
 **Tech Stack:** arduino-cli, ESP32 Arduino core, `Wire`
 
@@ -16,62 +16,54 @@ See [00-index.md](00-index.md#global-constraints). Relevant here:
 
 - Board ESP32-DevKitC-32E, FQBN `esp32:esp32:esp32`
 - MPU6050 at I2C `0x68`, SDA `GPIO21`, SCL `GPIO22`
-- LED `GPIO26`, buzzer `GPIO25` (node-01 only)
+- LED `GPIO26`, buzzer `GPIO25`
 
 ---
 
 ### Task 1: Buy the parts
 
-**Total ~¥5,500**, plus ~¥500 Akizuki shipping, plus ~¥600 if you need USB cables.
+**~¥3,100**, plus ~¥500 Akizuki shipping, plus ~¥300 if you need a USB cable.
 
 | Buy | Qty | ~Price | Where |
 |---|---|---|---|
-| ESP32-DevKitC-32E (WROOM-32E, 4 MB) | 2 | ¥1,800 ea | [Akizuki M-15673](https://akizukidenshi.com/catalog/g/g115673/) |
-| GY-521 module (MPU6050) | 2 | ~¥300 ea | Amazon.co.jp, any seller |
-| Breadboard | 2 | ~¥300 ea | Silicon House / Akizuki |
+| ESP32-DevKitC-32E (WROOM-32E, 4 MB) | 1 | ¥1,800 | [Akizuki M-15673](https://akizukidenshi.com/catalog/g/g115673/) |
+| GY-521 module (MPU6050) | 1 | ~¥300 | Amazon.co.jp, any seller |
+| Breadboard | 1 | ~¥300 | Silicon House / Akizuki |
 | Jumper wires, male-male | 1 set | ~¥400 | Silicon House / Akizuki |
 | Active buzzer module, 3-pin | 1 | ~¥100 | Silicon House / Akizuki |
-| 5 mm LED | 2 | ~¥100 pack | Silicon House / Akizuki |
-| 330 Ω resistor | 2 | ~¥100 pack | Silicon House / Akizuki |
-| micro-USB cable | 2 | ~¥300 ea | skip if you own two |
+| 5 mm LED | pack | ~¥100 | Silicon House / Akizuki |
+| 330 Ω resistor | pack | ~¥100 | Silicon House / Akizuki |
+| micro-USB cable | 1 | ~¥300 | skip if you own one |
 
 Osaka, in person — 日本橋 / でんでんタウン:
 
 - **シリコンハウス共立**, 浪速区日本橋5-8-26, 月–土 10:30–19:30 / 日祝 10:00–19:00, 06-6644-4446.
-  Everything except possibly the dev boards. **デジット** is in the same building.
-- **マルツ 大阪日本橋店** or **千石電商 大阪日本橋店** — backup for the ESP32 boards.
+  Everything except possibly the dev board. **デジット** is in the same building.
+- **マルツ 大阪日本橋店** or **千石電商 大阪日本橋店** — backup for the ESP32 board.
 - Nearest station 恵美須町.
 
-秋月電子 has **no Osaka store**. Its ¥1,800 is the online price; in Osaka expect ¥2,500–3,000
-per board. Cheapest split: order the two ESP32 boards and two GY-521s online, buy the cheap
-consumables in person.
+秋月電子 has **no Osaka store**. Its ¥1,800 is the online price; in Osaka expect ¥2,500–3,000.
+Cheapest split: order the ESP32 and the GY-521 online, buy the cheap consumables in person.
 
 - [ ] **Step 1: Check ESP32 stock before travelling**
 
 The dev board is the one item likely to be out. Check [eleshop.jp](https://eleshop.jp/shop/default.aspx)
 (Kyoritsu) and marutsu.co.jp, or just order from Akizuki online.
 
-- [ ] **Step 2: Buy two of everything that is per-node**
+- [ ] **Step 2: Buy a spare GY-521 if the shop has them**
 
-Two boards, two sensors, two breadboards, two LEDs, two resistors, two USB cables. **One**
-buzzer — only node-01 gets one.
+They are ~¥300 and they die from static and rough handling. A spare turns a dead sensor from a
+week's delay into a two-minute swap. It also leaves the door open to the two-sensor upgrade
+(AD0 → `0x69`) noted in the design's non-goals.
 
-Two breadboards, not one. Each node must sit on its own board so you can shake them
-independently. That is the entire demo.
-
-- [ ] **Step 3: Confirm two USB power sources**
-
-Both nodes run simultaneously. Two laptop ports, a 2-port charger, or a power bank. Check
-this now, not on demo day.
+- [ ] **Step 3: Buy the parts**
 
 ---
 
-### Task 2: Wire both nodes
+### Task 2: Wire the node
 
 **Files:**
 - Create: `docs/wiring.md`
-
-Both nodes are wired identically. The buzzer goes on node-01 only.
 
 ```
 MPU6050 (GY-521)     ESP32-DevKitC-32E
@@ -81,36 +73,34 @@ MPU6050 (GY-521)     ESP32-DevKitC-32E
   SDA   ───────────── GPIO21
 
 LED anode  ────────── GPIO26  ── 330 Ω ── LED ── GND
-Buzzer signal ─────── GPIO25   (node-01 only; VCC to 3V3, GND to GND)
+Buzzer signal ─────── GPIO25   (VCC to 3V3, GND to GND)
 ```
 
-- [ ] **Step 1: Wire node-01 with power off**
+- [ ] **Step 1: Wire with power off**
 
-USB unplugged while wiring. The GY-521 has an onboard regulator and tolerates 5 V on VIN,
-but its I2C lines are 3.3 V — powering from 3V3 keeps everything at one level and removes
-any question of level shifting.
+USB unplugged while wiring. The GY-521 has an onboard regulator and tolerates 5 V on VIN, but
+its I2C lines are 3.3 V — powering from 3V3 keeps everything at one level and removes any
+question of level shifting.
 
 - [ ] **Step 2: Check the LED orientation**
 
 Long leg (anode) toward GPIO26 through the resistor; short leg (cathode) to GND. Backwards
 means it silently never lights, which is confusing to debug later.
 
-- [ ] **Step 3: Wire node-02 identically, minus the buzzer**
-
-- [ ] **Step 4: Photograph both nodes**
+- [ ] **Step 3: Photograph the node**
 
 You need this for the report and for plan 06. Take it now while the wiring is tidy.
 
-- [ ] **Step 5: Write the wiring doc**
+- [ ] **Step 4: Write the wiring doc**
 
-Create `docs/wiring.md` with the ASCII diagram above, the photo, and one line noting the
-3.3 V choice and its reason.
+Create `docs/wiring.md` with the ASCII diagram above, the photo, and one line noting the 3.3 V
+choice and its reason.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add docs/wiring.md
-git commit -m "docs: wiring for both nodes"
+git commit -m "docs: node wiring"
 ```
 
 ---
@@ -146,8 +136,6 @@ arduino-cli lib install PubSubClient
 
 - [ ] **Step 4: Confirm the board is detected**
 
-Plug in node-01.
-
 ```bash
 arduino-cli board list
 ```
@@ -158,24 +146,20 @@ If no port appears, the board's USB-serial chip needs a driver. ESP32-DevKitC-32
 Silicon Labs CP2102 — install the CP210x VCP driver from Silicon Labs, then re-check. Some
 clone boards use a WCH CH340 instead and need the CH34x driver.
 
-- [ ] **Step 5: Record the port of each node**
+- [ ] **Step 5: Write down the port**
 
-```bash
-arduino-cli board list
-```
-
-Plug in one node at a time and note which port each gets. You will need both ports
-throughout. macOS port names can change across reboots — re-check if uploads start failing.
+You need it throughout. macOS port names can change across reboots — re-check if uploads start
+failing.
 
 ---
 
-### Task 4: Prove the sensors respond
+### Task 4: Prove the sensor responds
 
 **Files:**
 - Create: `firmware/i2c_scan/i2c_scan.ino`
 
-This is a throwaway sketch with one job: confirm the wiring before any real firmware exists.
-If this fails, no amount of correct algorithm will help.
+A throwaway sketch with one job: confirm the wiring before any real firmware exists. If this
+fails, no amount of correct algorithm will help.
 
 - [ ] **Step 1: Write the scanner**
 
@@ -212,7 +196,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 firmware/i2c_scan
 
 Expected: `Sketch uses NNNNNN bytes`, no errors.
 
-- [ ] **Step 3: Upload to node-01 and read the output**
+- [ ] **Step 3: Upload and read the output**
 
 Substitute your port from Task 3 Step 5.
 
@@ -243,26 +227,22 @@ done, 1 device(s)
 | Found `0x69` instead | AD0 pin pulled high. Fine — note it, and change `MPU_ADDR` in plan 02. |
 | Garbage on serial | Wrong baud rate. Must be 115200. |
 
-- [ ] **Step 5: Repeat for node-02**
-
-Same sketch, node-02's port. Both nodes must report `0x68` before you proceed.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add firmware/i2c_scan/i2c_scan.ino
 git commit -m "test: I2C scanner to verify sensor wiring"
 ```
 
-Keep this sketch. When a node misbehaves in plan 04, re-running it is the fastest way to
-rule out wiring.
+Keep this sketch. When the node misbehaves in plan 04, re-running it is the fastest way to rule
+out wiring.
 
 ---
 
 ## Done when
 
-- Both nodes wired, photographed, `docs/wiring.md` committed
-- `arduino-cli board list` shows both ports, and you have written them down
-- Both nodes print `found device at 0x68`
+- Node wired, photographed, `docs/wiring.md` committed
+- `arduino-cli board list` shows the port, and you have written it down
+- The node prints `found device at 0x68`
 
 Next: [02-node-firmware.md](02-node-firmware.md)

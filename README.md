@@ -13,15 +13,15 @@ second node and requiring agreement is the cheapest way to get that discriminati
 is the approach used by real dense-array networks such as the Community Seismic Network
 and MyShake.
 
-## Parts (~¥4,700)
+## Parts (~¥5,100)
 
-| Part | Qty |
-|---|---|
-| ESP32-DevKitC (ESP32-WROOM-32E, 38-pin) | 2 |
-| MPU6050 / GY-521 accelerometer module | 2 |
-| Active buzzer module, 3-pin | 1 |
-| 5 mm LED + 330 Ω resistor | 2 |
-| Breadboard and jumper wires | 1 set |
+| Part | Qty | Price |
+|---|---|---|
+| [ESP32-DevKitC-32E](https://akizukidenshi.com/catalog/g/g115673/) (ESP32-WROOM-32E, 4 MB) | 2 | ¥1,800 ea |
+| MPU6050 / GY-521 accelerometer module | 2 | ~¥300 ea |
+| Active buzzer module, 3-pin | 1 | ~¥100 |
+| 5 mm LED + 330 Ω resistor | 2 | ~¥30 ea |
+| Breadboard and jumper wires | 1 set | ~¥700 |
 
 ## Wiring
 

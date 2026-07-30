@@ -29,16 +29,15 @@ decision, not drift.
 
 ## Hardware
 
-Per-node cost ~¥1,930; total ~¥4,700 including the shared breadboard and the single buzzer.
-Prices are pre-verification estimates from Japanese retailers (Akizuki Denshi, Amazon.co.jp).
+Per-node cost ~¥2,130; total ~¥5,100 including the shared breadboard and the single buzzer.
 
-| Part | Qty | Est. price |
-|---|---|---|
-| ESP32-DevKitC (ESP32-WROOM-32E, 38-pin) | 2 | ¥3,200 |
-| MPU6050 / GY-521 accelerometer module | 2 | ¥600 |
-| Active buzzer module, 3-pin | 1 | ¥100 |
-| 5 mm LED + 330 Ω resistor | 2 | ¥60 |
-| Breadboard and jumper wires | 1 set | ¥700 |
+| Part | Qty | Price | Source |
+|---|---|---|---|
+| ESP32-DevKitC-32E (ESP32-WROOM-32E, 4 MB) | 2 | ¥3,600 | [Akizuki M-15673](https://akizukidenshi.com/catalog/g/g115673/), ¥1,800 ea — confirmed |
+| MPU6050 / GY-521 accelerometer module | 2 | ~¥600 | Amazon.co.jp, any seller — price unconfirmed |
+| Active buzzer module, 3-pin | 1 | ~¥100 | Akizuki or Amazon.co.jp |
+| 5 mm LED + 330 Ω resistor | 2 | ~¥60 | Akizuki |
+| Breadboard and jumper wires | 1 set | ~¥700 | Akizuki |
 
 The ESP32-DevKitC is chosen over the cheaper ESP32-C3 SuperMini (~¥700) because every
 MPU6050 tutorial targets the classic board. At two nodes the ¥1,800 difference does not
@@ -181,18 +180,27 @@ Tap one node — LED only, no alarm, "rejected as local noise". Then shake the t
 nodes sit on — both LEDs, buzzer, alarm on the dashboard. The contrast between those two
 actions is the whole project.
 
-## Open questions
+## Chance of catching a real event
 
-Pending a background research pass. None of these change the design; they change what the
-report can claim.
+Shindo 3+ is common enough in Japan to be worth waiting for. Over 1923–2014 the per-
+prefecture average was 474 shindo-3+ events in 92 years (~5/year), and Tokyo recorded 2,549
+(~28/year) — see [todo-ran prefecture ranking](https://todo-ran.com/t/kiji/18560) and
+[tenki.jp shindo-3+ log](https://earthquake.tenki.jp/bousai/earthquake/entries/level-3/index.html).
+On the Tokyo figure, a three-month semester would expect roughly 5–7 opportunities.
 
-- Actual current stock and price of MPU6050 modules and ESP32-DevKitC at Japanese retailers.
-- Whether ambient building vibration exceeds the MPU6050's ~0.9 gal sensor noise floor, and
-  therefore what the realistic minimum detectable shindo is on a desk indoors.
-- How often shindo 3+ events occur near major Japanese cities in a three-month semester,
-  which determines whether a real event is likely to be captured at all.
-- Which free public feed (JMA, P2P地震情報, NIED K-NET) is usable for cross-checking a
-  recorded event against published intensity.
+Treat those numbers as approximate. They come from secondary aggregators, and a separate
+2018 figure in the same search (238 shindo-1+ events nationwide) looks inconsistent with
+JMA's usual annual counts, so at least one source is miscounting. Check
+[JMA's shindo database](https://www.data.jma.go.jp/eqdb/data/shindo/) directly for the
+authoritative count for your prefecture before quoting a number in the report.
+
+## Open question
+
+One remains, and the build answers it for free: **is the real noise floor set by the sensor
+or by the building?** The threshold calibration in step 4 measures exactly this. If quiet-desk
+RMS lands near the predicted ~0.9 gal, the MPU6050 dominates and shindo 3 is detectable. If
+it lands well above, building vibration dominates and the floor is higher. Either result is
+a legitimate measured finding — report the number you get.
 
 If real-event capture turns out to be unlikely, the project still stands on the correlation
 demonstration. Real capture is a bonus, not a requirement.

@@ -101,9 +101,14 @@ Two details that otherwise cause misbehaviour:
 ### Threshold calibration
 
 `THRESHOLD` is in gal, the same units as `dev`. Do not hardcode a guessed value. On a quiet
-desk, log `dev` for 60 seconds and record its RMS. Set `THRESHOLD` to 10× that figure.
-Repeat per node — they will differ, and per-node thresholds are a legitimate finding for the
-report.
+desk, log `dev` for 60 seconds and record its RMS. Measure **both** nodes — they will differ,
+being different sensor units on different spots of the desk.
+
+Set a **single shared threshold** to 10× the *higher* of the two RMS values. Both nodes run
+byte-identical firmware, so there is one threshold; and the noisier node has to set it, since
+a threshold below its noise floor would make it fire continuously and destroy the correlation
+rule. Record both RMS figures anyway — the spread between two nominally identical sensors is a
+legitimate measured result for the report.
 
 ### Identity
 

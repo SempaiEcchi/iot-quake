@@ -23,6 +23,8 @@ pip install -r correlator/requirements.txt
 pytest sim correlator -q          # unit + end-to-end
 ```
 
+The firmware can be compile-checked without an ESP32 too — see TESTING.md §4.
+
 Full guide: **[TESTING.md](TESTING.md)**
 
 ## Why correlation

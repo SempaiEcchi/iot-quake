@@ -130,7 +130,45 @@ failure mode plan 05's tuning task exists to catch.
 
 ---
 
-## 4. Optional: the cloud dashboard
+## 4. Compile the firmware — still no hardware
+
+You cannot run the sketch without an ESP32, but you can prove it builds. This catches every
+syntax error, missing include, and type mistake before your parts arrive.
+
+```bash
+brew install arduino-cli
+arduino-cli config init
+arduino-cli config add board_manager.additional_urls \
+  https://espressif.github.io/arduino-esp32/package_esp32_index.json
+arduino-cli core update-index
+arduino-cli core install esp32:esp32          # large download, few minutes
+arduino-cli lib install PubSubClient
+
+cp firmware/node/config.h.example firmware/node/config.h
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/node
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/i2c_scan
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/calibrate
+```
+
+Expected for `firmware/node`:
+
+```
+Sketch uses 921932 bytes (70%) of program storage space.
+Global variables use 48304 bytes (14%) of dynamic memory.
+```
+
+70% flash and 14% RAM leaves plenty of headroom. Worth re-checking after any firmware change —
+if flash creeps toward 100%, that is the number that tells you.
+
+To see warnings the default build hides:
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all --clean firmware/node
+```
+
+Expected: no output beyond the size summary.
+
+## 5. Optional: the cloud dashboard
 
 ```bash
 docker compose --profile cloud up -d       # ~2 GB, a few minutes on first boot
@@ -154,7 +192,8 @@ your demo.
 
 ## What the mocks do NOT cover
 
-Be honest about this in your report. Passing every test above still leaves these unproven:
+Be honest about this in your report. Passing every test above — including the compile — still
+leaves these unproven:
 
 - **I2C** — wiring, the `0x68` address, register reads
 - **WiFi** — connection, reconnection, the blocking-`connect()` stall the firmware guards against

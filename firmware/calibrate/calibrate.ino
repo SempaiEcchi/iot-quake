@@ -20,6 +20,11 @@ void setup() {
   Wire.setClock(400000);
   Wire.beginTransmission(MPU_ADDR); Wire.write(0x6B); Wire.write(0x00);
   Wire.endTransmission();
+  // CONFIG: DLPF_CFG=6 -> 5 Hz accel bandwidth. MUST match node.ino, or the
+  // measured noise floor describes a different sensor configuration than the
+  // one that will actually run.
+  Wire.beginTransmission(MPU_ADDR); Wire.write(0x1A); Wire.write(0x06);
+  Wire.endTransmission();
   Wire.beginTransmission(MPU_ADDR); Wire.write(0x1C); Wire.write(0x00);
   Wire.endTransmission();
   delay(100);

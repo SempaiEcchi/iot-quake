@@ -14,8 +14,18 @@
 
 #define MPU_ADDR       0x68   // 0x69 if your scan found AD0 pulled high
 #define REG_PWR_MGMT   0x6B
+#define REG_CONFIG     0x1A
 #define REG_ACCEL_CFG  0x1C
 #define REG_ACCEL_XOUT 0x3B
+
+// DLPF_CFG = 6 -> accelerometer bandwidth 5 Hz (19 ms group delay).
+// This is the low-pass half of the 0.2-5 Hz band the design specifies. The
+// EMA in detector.cpp is only a high-pass; without this the sensor runs at
+// its 260 Hz default and the noise floor is ~sqrt(260/4.8) = 7x worse, which
+// would push the measured threshold above shindo 3 entirely. Sampling at
+// 100 Hz does not fix it -- out-of-band noise aliases in rather than
+// disappearing, so the filtering has to happen in the sensor.
+#define DLPF_5HZ       0x06
 
 #define LSB_PER_G    16384.0f // +-2 g full scale
 #define GAL_PER_G    980.665f
@@ -39,6 +49,11 @@ static bool mpu_init() {
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(REG_PWR_MGMT);
   Wire.write(0x00);                    // wake from sleep
+  if (Wire.endTransmission() != 0) return false;
+
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(REG_CONFIG);
+  Wire.write(DLPF_5HZ);                // band-limit to 5 Hz -- see above
   if (Wire.endTransmission() != 0) return false;
 
   Wire.beginTransmission(MPU_ADDR);
@@ -73,9 +88,11 @@ static void on_message(char* topic, byte* payload, unsigned int len) {
   }
 }
 
-// Near-non-blocking: mqtt.connect() still blocks, but setSocketTimeout(2)
-// caps that at ~2 s instead of PubSubClient's 15 s default, and the sample
-// gate resyncs afterwards rather than firing a catch-up burst.
+// Near-non-blocking. mqtt.connect() still blocks: the TCP connect phase is
+// bounded by WiFiClient's own default (~3 s), and setSocketTimeout(2) bounds
+// the MQTT handshake that follows, instead of PubSubClient's 15 s default.
+// Either way the stall is seconds, so the sample gate resyncs afterwards
+// rather than firing a catch-up burst. See loop().
 static void net_pump() {
   if (WiFi.status() != WL_CONNECTED) {
     if (millis() - last_reconnect_ms > 5000) {

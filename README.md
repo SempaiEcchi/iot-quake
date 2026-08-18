@@ -20,7 +20,8 @@ firmware, and speaks the real MQTT contract. Mosquitto runs in Docker.
 docker compose up -d
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r correlator/requirements.txt
-pytest sim correlator -q          # unit + end-to-end
+pytest sim correlator dashboard -q      # unit + end-to-end + dashboard
+python dashboard/server.py --broker localhost   # then open localhost:8000
 ```
 
 The firmware can be compile-checked without an ESP32 too — see TESTING.md §4.
@@ -62,12 +63,14 @@ Buzzer ──────  GPIO25
 ## Architecture
 
 ```
-[ESP32 + MPU6050] ──┐
-                    ├──► Mosquitto ──► correlator ──┬──► quake/alarm ──► buzzer
-[fake_node.py]    ──┘     (laptop)                  └──► Thingsboard (dashboard)
+[ESP32 + MPU6050] ──┐                     ┌──► quake/alarm ──► buzzer
+                    ├──► Mosquitto ──┬──► correlator ──┴──► Thingsboard (optional cloud)
+[fake_node.py]    ──┘    (laptop)    │
+                                     └──► dashboard ──► http://localhost:8000
 ```
 
-The broker stays local so the demo survives an internet outage — events, correlation, alarm,
+The dashboard subscribes to the broker directly, not through the correlator — detection never
+depends on a browser being open. The broker stays local so the demo survives an internet outage — events, correlation, alarm,
 and buzzer all keep working; only the cloud dashboard goes blank. The correlator forwards to
 Thingsboard rather than the firmware doing it, which keeps the node plaintext with no TLS.
 
@@ -93,11 +96,12 @@ That is why a hardware project can have real unit tests.
 4. Calibrate: log deviation on a quiet desk for 60 seconds, set the threshold to 10× the RMS
    you measure. Do not guess it.
 
-5. Run the correlator, and the simulated channel in a second terminal:
+5. Run the correlator, the dashboard, and the simulated channel — one terminal each:
 
    ```
    source .venv/bin/activate
    cd correlator && python main.py --broker <laptop-ip>
+   python dashboard/server.py --broker <laptop-ip>     # http://localhost:8000
    cd correlator && python fake_node.py --broker <laptop-ip>
    ```
 
@@ -130,7 +134,8 @@ Stated up front rather than buried.
   noise like footsteps reaches every sensor and correlates. Only amplitude rejects that.
 - **No epicentre location** — that needs sub-millisecond timing, which WiFi cannot provide.
 - **No official JMA shindo** — peak acceleration in gal only.
-- **Detection floor around shindo 3**, subject to the measured noise floor.
+- **Detection floor around shindo 3** (at a 5× threshold; shindo 4 at 10×), subject to the
+  measured noise floor.
 
 ## Documentation
 

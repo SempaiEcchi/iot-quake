@@ -44,13 +44,17 @@ all detector tests passed
 14 passed
 ```
 
-Three suites, and the middle one is the important one:
+Five suites. The parity one is the load-bearing one:
 
-| Suite | Tests | What it proves |
-|---|---|---|
-| `test/test_detector.cpp` | 6 | The **firmware** algorithm is correct |
-| `sim/test_parity.py` | 6 | The **Python port** gives identical results — so the mock is faithful |
-| `correlator/test_core.py` | 8 | The correlation rule is correct |
+| Suite | Tests | Broker? | What it proves |
+|---|---|---|---|
+| `test/test_detector.cpp` | 6 | no | The **firmware** algorithm is correct |
+| `sim/test_parity.py` | 6 | no | The **Python port** gives identical results — so the mock is faithful |
+| `correlator/test_core.py` | 8 | no | The correlation rule is correct |
+| `sim/test_e2e.py` | 3 | yes | The whole loop works, mock nodes to alarm to buzzer |
+| `dashboard/test_dashboard.py` | 6 | yes | The dashboard aggregates state correctly |
+
+Everything at once, once Docker is up: `pytest sim correlator dashboard -q` → **23 passed**.
 
 If parity ever fails, the mock has drifted from the firmware and mock results stop meaning
 anything. `sim/detector.py` and `firmware/node/detector.cpp` must be changed together.
@@ -130,7 +134,39 @@ failure mode plan 05's tuning task exists to catch.
 
 ---
 
-## 4. Compile the firmware — still no hardware
+## 4. The dashboard
+
+The presentation layer. Subscribes to the broker directly and serves one self-contained page —
+no build step, no CDN, no accounts, works offline.
+
+```bash
+source .venv/bin/activate
+python dashboard/server.py --broker localhost
+open http://localhost:8000
+```
+
+With mock nodes running (section 3) you get:
+
+- a **banner** that turns red on alarm and names the agreeing channels
+- **live traces** of `dev_gal` per channel, with simulated channels tagged and dead ones
+  marked offline after 5 s of silence
+- an **event log** with alarms highlighted
+- the **headline metric**: single-channel events rejected — each of which would have been a
+  false alarm on a single-channel design
+
+It is deliberately separate from the correlator: detection must not depend on whether a browser
+is open. Kill the dashboard and alarms still fire.
+
+Tested by `dashboard/test_dashboard.py`, which starts the real server, publishes real MQTT, and
+reads the real HTTP endpoint:
+
+```bash
+pytest dashboard -q
+```
+
+Expected: `6 passed`.
+
+## 5. Compile the firmware — still no hardware
 
 You cannot run the sketch without an ESP32, but you can prove it builds. This catches every
 syntax error, missing include, and type mistake before your parts arrive.
@@ -168,14 +204,17 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all --clean firmware/nod
 
 Expected: no output beyond the size summary.
 
-## 5. Optional: the cloud dashboard
+## 6. Optional: Thingsboard in Docker
+
+The local dashboard in section 4 is the presentation layer. Thingsboard is optional on top, if
+your course wants a named IoT platform in the report.
 
 ```bash
 docker compose --profile cloud up -d       # ~2 GB, a few minutes on first boot
 ```
 
-Then http://localhost:8080, log in as `tenant@thingsboard.org` / `tenant`. Create a device,
-copy its access token, and:
+Then http://localhost:8080, log in as `tenant@thingsboard.org` / `tenant`. **Devices → + → Add
+new device**, name it `quake-net`, open it and copy the access token from **Details**. Then:
 
 ```bash
 export TB_TOKEN='your-device-token'
@@ -183,6 +222,24 @@ export TB_HOST=localhost
 export TB_PORT=1884                        # remapped so it cannot clash with Mosquitto
 cd correlator && python main.py --broker localhost
 ```
+
+Expected first line: `thingsboard connected: localhost:1884`. Shake two channels, then check
+**Devices → quake-net → Latest telemetry**. Verified keys:
+
+```
+alarm            1
+alarm_nodes      mock-tb1,mock-tb2
+alarm_peak_gal   41.52
+dev_gal_<node>   0.43
+event_node       mock-tb1
+event_peak_gal   41.50
+```
+
+Build a dashboard from those keys with **Dashboards → + → Create new dashboard**: a time-series
+widget on `dev_gal_<node>`, latest-value cards on `event_peak_gal` and `alarm`.
+
+To use the hosted instance instead of Docker, drop `TB_HOST`/`TB_PORT` — they default to
+`demo.thingsboard.io:1883`.
 
 Without `TB_TOKEN` the correlator prints `running local-only` and everything else works. The
 cloud is never load-bearing — that is deliberate, so a dead internet connection cannot kill
@@ -234,6 +291,13 @@ node correlating with a mock proves the firmware speaks the contract correctly.
 Stop everything:
 
 ```bash
-docker compose down
-pkill -f mock_node.py; pkill -f fake_node.py
+docker compose --profile cloud down
+pkill -f mock_node.py; pkill -f fake_node.py; pkill -f dashboard/server.py
+```
+
+Stray publishers are worth checking for: the dashboard aggregates **every** node on the broker,
+so a forgotten `mock_node.py` inflates its counters.
+
+```bash
+pgrep -fl "mock_node|fake_node|main.py --broker|dashboard/server" || echo "all stopped"
 ```

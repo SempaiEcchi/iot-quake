@@ -32,17 +32,21 @@ drift.
 | JMA calculated seismic intensity (計測震度) | The official algorithm needs a specified frequency-domain filter and the 0.3 s rule. Out of proportion to the course. Report peak acceleration in gal instead. |
 | Epicentre location / triangulation | Requires sub-millisecond timing. Impossible over WiFi, and impossible with one sensor. Must not be claimed. |
 | Cloud MQTT broker | The broker is Mosquitto on the laptop. Nodes stay plaintext with no TLS, and the demo survives an internet outage — only the dashboard goes blank. The correlator forwards to the cloud instead. |
-| OLED display, microSD logging, battery power | No function the cloud dashboard does not already provide. |
+| OLED display, microSD logging, battery power | No function the web dashboard does not already provide. |
 | Hardware-timer sampling ISR | A two-line gate resync closes the same failure mode. See Sampling. |
 
 ## Architecture
 
 ```
-[ESP32 + MPU6050] ──┐
-                    ├──► Mosquitto ──► correlator ──┬──► quake/alarm ──► buzzer
-[fake_node.py]    ──┘     (laptop)                  └──► Thingsboard (dashboard)
-   (laptop)
+[ESP32 + MPU6050] ──┐                     ┌──► quake/alarm ──► buzzer
+                    ├──► Mosquitto ──┬──► correlator ──┴──► Thingsboard (optional cloud)
+[fake_node.py]    ──┘    (laptop)    │
+                                     └──► dashboard ──► http://localhost:8000
 ```
+
+The **dashboard subscribes to the broker directly rather than reading from the correlator.**
+Detection must not depend on whether a browser is watching — killing the dashboard changes
+nothing about whether an alarm fires.
 
 Channel A is the real ESP32. Channel B is `fake_node.py`, triggered by a keypress.
 
@@ -58,6 +62,7 @@ shell** wiring it to the world.
 |---|---|
 | `firmware/node/detector.cpp` — no Arduino headers | `firmware/node/node.ino` — Wire, WiFi, MQTT |
 | `correlator/core.py` — no network | `correlator/main.py` — paho-mqtt, Thingsboard |
+| — | `dashboard/server.py` — MQTT + HTTP, read-only |
 
 The cores are unit-tested on the laptop with fake acceleration and fake time. That split is
 why a hardware project can have real tests, and it is worth a paragraph in the report.
@@ -80,8 +85,15 @@ In Osaka: シリコンハウス共立, 浪速区日本橋5-8-26, 月–土 10:30
 no Osaka store, so its ¥1,800 is the online price; expect ¥2,500–3,000 locally for the board.
 
 The MPU6050's noise floor is roughly 400 µg/√Hz, which over a 0.2–5 Hz band is about 0.9 gal
-RMS. JMA shindo 3 is roughly 2.5–8 gal, so shindo 3 and above should sit clearly above sensor
-noise while shindo 1–2 will not. Whether ambient building vibration dominates that figure is
+RMS. **That band is not free.** The EMA in `detector.cpp` supplies only the high-pass end; the
+low-pass end comes from the sensor's own DLPF, set via CONFIG (`0x1A`) `DLPF_CFG = 6` → 5 Hz.
+Left at the 260 Hz default the floor is √(260/4.8) ≈ 7× worse, around 6 gal, and sampling at
+100 Hz does not rescue it — out-of-band noise aliases into the passband rather than vanishing.
+Both `node.ino` and `calibrate.ino` set this register, and they must agree, or calibration
+characterises a sensor configuration that never runs.
+
+With the filter in place, JMA shindo 3 (roughly 2.5–8 gal) sits above the sensor noise floor
+while shindo 1–2 does not. Whether ambient building vibration dominates that figure is
 measured during calibration, not assumed.
 
 ### Wiring
@@ -114,8 +126,9 @@ else                                            next_sample_us += SAMPLE_US;
 Without this, any stall in `loop()` leaves the gate hundreds of periods behind, and it then
 fires hundreds of times back to back — all with nearly the same `millis()`. That burst
 corrupts the EMA baseline and can bypass warm-up entirely. The matching cause is capped with
-`mqtt.setSocketTimeout(2)`, because PubSubClient's `connect()` blocks for up to 15 s by
-default whenever the broker is unreachable.
+`mqtt.setSocketTimeout(2)`: `connect()` blocks whenever the broker is unreachable — the TCP
+phase bounded by WiFiClient's own ~3 s default, the MQTT handshake by PubSubClient's, which
+defaults to 15 s. The resync makes the stall harmless either way.
 
 ### Detection
 
@@ -144,7 +157,21 @@ Two details that otherwise cause misbehaviour:
 ### Threshold calibration
 
 `THRESHOLD` is in gal, the same units as `dev`. Do not hardcode a guessed value. On a quiet
-desk, log `dev` for 60 seconds, take its RMS, and set `THRESHOLD` to 10× that figure.
+desk, log `dev` for 60 seconds and take its RMS.
+
+The multiplier is a genuine trade-off, and 10× does not sit where the shindo-3 claim needs it:
+
+| Multiplier | Threshold at 0.9 gal RMS | Lowest shindo reached | False triggers |
+|---|---|---|---|
+| 10× | 9.0 gal | 4 (8–25 gal) | effectively never |
+| **5×** | **4.5 gal** | **3 (2.5–8 gal)** | ~1 per two days |
+| 3× | 2.7 gal | 3, low end | several per hour |
+
+**Use 5× if the goal is shindo 3.** At 5σ on Gaussian noise band-limited to 5 Hz (~10
+independent samples/second) the false-trigger rate is roughly one per two days — and every
+one of those is a single-channel event that correlation rejects anyway. 10× is the safe
+default when the measured floor turns out to be building-dominated rather than
+sensor-dominated. Decide from your measured RMS, and state the multiplier in the report.
 
 ### Identity
 
@@ -241,7 +268,8 @@ State these in the report rather than letting an examiner find them.
   it would still not reject floor-borne noise such as footsteps, which reaches every sensor.
   Only amplitude thresholds reject that.
 - **No epicentre, no official shindo.** Peak acceleration in gal only.
-- **Detection floor is around shindo 3**, subject to the measured noise floor.
+- **Detection floor is around shindo 3 at a 5× threshold, shindo 4 at 10×.** Subject to the
+  measured noise floor, which may be building-dominated rather than sensor-dominated.
 
 ## Chance of catching a real event
 

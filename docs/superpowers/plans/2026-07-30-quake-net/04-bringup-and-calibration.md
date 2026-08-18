@@ -23,7 +23,7 @@ See [00-index.md](00-index.md#global-constraints). Relevant here:
 ### Task 1: Network and broker
 
 **Files:**
-- Create: `correlator/mosquitto.conf`
+- Create: `mosquitto/mosquitto.conf`
 
 Use a **phone hotspot**, not university WiFi. Campus networks isolate clients from each
 other, which silently breaks node-to-broker traffic even though every device shows as
@@ -54,7 +54,7 @@ file the nodes cannot connect, and the symptom is a silent reconnect loop with n
 the broker side.
 
 ```
-# correlator/mosquitto.conf
+# mosquitto/mosquitto.conf
 # Demo broker: open on the LAN, no auth. Intended for a private phone hotspot.
 listener 1883 0.0.0.0
 allow_anonymous true
@@ -68,7 +68,7 @@ internet-facing. If you later need it on an untrusted network, add `password_fil
 - [ ] **Step 5: Start the broker in verbose mode**
 
 ```bash
-mosquitto -c correlator/mosquitto.conf -v
+mosquitto -c mosquitto/mosquitto.conf -v
 ```
 
 Expected: `Opening ipv4 listen socket on port 1883`. Leave this running in its own terminal —
@@ -95,7 +95,7 @@ firewall off for the demo, or add mosquitto to the allow list.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add correlator/mosquitto.conf
+git add mosquitto/mosquitto.conf
 git commit -m "chore: mosquitto config for LAN access
 
 Mosquitto 2.x is localhost-only and anonymous-denied by default, which

@@ -1,0 +1,14 @@
+// firmware/node/config.h.example
+// Copy to config.h and fill in. config.h is gitignored.
+#pragma once
+
+#define WIFI_SSID      "your-hotspot-name"
+#define WIFI_PASSWORD  "your-hotspot-password"
+
+// Laptop's IP on the hotspot. Find it with: ipconfig getifaddr en0
+#define MQTT_HOST      "192.168.1.100"
+#define MQTT_PORT      1883
+
+// Trigger threshold in gal. Measured during calibration -- do not guess.
+// Placeholder only, large enough that nothing triggers until calibrated.
+#define THRESHOLD_GAL  50.0f

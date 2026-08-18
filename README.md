@@ -11,6 +11,20 @@ contract and is triggered by hand. What this project demonstrates is the protoco
 correlation rule end to end, not two-point physical seismology. A real second node is a
 drop-in: no code changes.
 
+## Try it now — no hardware needed
+
+A mock node generates synthetic acceleration, runs the same detection algorithm as the
+firmware, and speaks the real MQTT contract. Mosquitto runs in Docker.
+
+```bash
+docker compose up -d
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r correlator/requirements.txt
+pytest sim correlator -q          # unit + end-to-end
+```
+
+Full guide: **[TESTING.md](TESTING.md)**
+
 ## Why correlation
 
 A single accelerometer cannot distinguish local vibration from ground motion. Requiring two
@@ -64,8 +78,7 @@ That is why a hardware project can have real unit tests.
 1. Start a broker on your laptop and note its IP:
 
    ```
-   brew install mosquitto
-   mosquitto -c correlator/mosquitto.conf -v
+   docker compose up -d          # or: mosquitto -c mosquitto/mosquitto.conf -v
    ipconfig getifaddr en0
    ```
 
@@ -81,8 +94,9 @@ That is why a hardware project can have real unit tests.
 5. Run the correlator, and the simulated channel in a second terminal:
 
    ```
-   python correlator/main.py --broker <laptop-ip>
-   python correlator/fake_node.py --broker <laptop-ip>
+   source .venv/bin/activate
+   cd correlator && python main.py --broker <laptop-ip>
+   cd correlator && python fake_node.py --broker <laptop-ip>
    ```
 
 ## MQTT topics
@@ -118,6 +132,7 @@ Stated up front rather than buried.
 
 ## Documentation
 
+- [TESTING.md](TESTING.md) — run and debug the whole system on your laptop, no hardware
 - [Design](docs/superpowers/specs/2026-07-30-esp32-quake-node-design.md) — architecture,
   detection algorithm, error handling, and every feature deliberately cut
 - [Build plans](docs/superpowers/plans/2026-07-30-quake-net/00-index.md) — step by step, from

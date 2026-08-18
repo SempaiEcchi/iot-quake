@@ -1,0 +1,41 @@
+# Services for quake-net. The ESP32 is the only thing not containerised.
+#
+#   docker compose up -d                    broker only (fast, all you need)
+#   docker compose --profile cloud up -d    broker + Thingsboard dashboard
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: quake-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      # mosquitto_sub with -E exits as soon as it has subscribed.
+      test: ["CMD", "mosquitto_sub", "-h", "localhost", "-t", "$$SYS/#", "-E"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Optional. Heavy (~2 GB) and takes a few minutes on first boot.
+  # Only start this when you actually want the dashboard:
+  #   docker compose --profile cloud up -d
+  # Then http://localhost:8080  (tenant@thingsboard.org / tenant)
+  thingsboard:
+    profiles: ["cloud"]
+    image: thingsboard/tb-postgres
+    container_name: quake-thingsboard
+    restart: unless-stopped
+    ports:
+      - "8080:9090"     # web UI
+      - "1884:1883"     # its own MQTT, remapped so it cannot clash with mosquitto
+    environment:
+      TB_QUEUE_TYPE: in-memory
+    volumes:
+      - tb-data:/data
+      - tb-logs:/var/log/thingsboard
+
+volumes:
+  tb-data:
+  tb-logs:

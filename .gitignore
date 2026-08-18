@@ -1,0 +1,11 @@
+# secrets — never commit
+firmware/node/config.h
+
+# build artifacts
+test/test_detector
+build/
+*.o
+__pycache__/
+.pytest_cache/
+.venv/
+*.dSYM/

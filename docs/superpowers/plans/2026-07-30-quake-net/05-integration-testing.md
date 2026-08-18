@@ -24,7 +24,7 @@ Four terminals. **Note which tests need `fake_node.py` stopped** — Test 3 depe
 
 ```bash
 # 1: broker
-mosquitto -c correlator/mosquitto.conf -v
+mosquitto -c mosquitto/mosquitto.conf -v
 
 # 2: all traffic
 mosquitto_sub -h 127.0.0.1 -t 'quake/#' -v

@@ -204,7 +204,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all --clean firmware/nod
 
 Expected: no output beyond the size summary.
 
-## 6. Optional: Thingsboard in Docker
+## 6. Optional: Thingsboard (you probably do not need this)
 
 The local dashboard in section 4 is the presentation layer. Thingsboard is optional on top, if
 your course wants a named IoT platform in the report.

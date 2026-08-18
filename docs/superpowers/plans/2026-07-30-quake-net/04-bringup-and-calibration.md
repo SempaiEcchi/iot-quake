@@ -41,13 +41,19 @@ If that prints nothing, the hotspot is on a different interface — try `en1`, o
 `ifconfig | grep "inet "` and pick the `192.168.x.x` address. Write it down; this is
 `MQTT_HOST`.
 
-- [ ] **Step 3: Install mosquitto**
+- [ ] **Step 3: Start the broker**
+
+It runs in Docker, and `mosquitto/mosquitto.conf` already exists in the repo:
 
 ```bash
-brew install mosquitto
+docker compose up -d
+docker compose ps          # STATUS should say Up
 ```
 
-- [ ] **Step 4: Write the broker config**
+Skip to Step 6. Steps 4–5 describe the config and a bare-metal `brew install mosquitto` run,
+kept because the config is worth understanding and because Docker is not always available.
+
+- [ ] **Step 4: Understand the broker config**
 
 Mosquitto 2.x binds to localhost only and refuses anonymous clients by default. Without this
 file the nodes cannot connect, and the symptom is a silent reconnect loop with no error on
@@ -65,9 +71,10 @@ acceptable on a phone hotspot you control for a classroom demo. Do not run this
 configuration on university WiFi, a home network shared with others, or anything
 internet-facing. If you later need it on an untrusted network, add `password_file` and TLS.
 
-- [ ] **Step 5: Start the broker in verbose mode**
+- [ ] **Step 5: Optional — run it without Docker instead**
 
 ```bash
+brew install mosquitto
 mosquitto -c mosquitto/mosquitto.conf -v
 ```
 
@@ -360,7 +367,18 @@ Expected: an `event` from `node-XXXXXX`, an `event` from `sim-000001`, then
 | Alarm but no buzzer | Node is not subscribed to `quake/alarm`, or the buzzer is miswired. Check the broker log for the alarm publish. |
 | Alarm fires with no tap at all | `fake_node.py` alone cannot alarm — it is one node. If this happens, something is republishing events; check for a stray `mosquitto_pub`. |
 
-- [ ] **Step 7: Confirm the dashboard is receiving**
+- [ ] **Step 7: Start the local dashboard**
+
+```bash
+source .venv/bin/activate
+python dashboard/server.py --broker localhost
+```
+
+Open http://localhost:8000. Your node should appear as a channel with a live trace and **no**
+`simulated` tag — that tag keys off the `sim-`/`mock-` prefix, so seeing it absent is a quick
+confirmation the real hardware is what is reporting.
+
+- [ ] **Step 8: Confirm Thingsboard is receiving (optional)**
 
 Open your Thingsboard dashboard. Expected: `dev_gal_node-XXXXXX` charting live, and
 `event_peak_gal` / `alarm` updating when you repeat Step 6.
@@ -368,7 +386,7 @@ Open your Thingsboard dashboard. Expected: `dev_gal_node-XXXXXX` charting live, 
 Add the deviation widget now if you deferred it in plan 03 Task 6 Step 4 — you have the real
 node ID as of Step 3.
 
-- [ ] **Step 8: Record the results**
+- [ ] **Step 9: Record the results**
 
 Create `docs/RESULTS.md`:
 
@@ -407,7 +425,7 @@ With a threshold of 0.00 gal, the lowest detectable shindo is [fill in].
 Cross-check against https://www.data.jma.go.jp/eqdb/data/shindo/
 ```
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add docs/RESULTS.md
@@ -421,7 +439,7 @@ git commit -m "docs: measured noise floor and threshold"
 - `mosquitto_sub -h 127.0.0.1 -t 'quake/#' -v` shows telemetry from the node
 - Tapping the breadboard alone produces events but **no** alarm
 - Tapping plus an Enter on `fake_node.py` within 2 s produces one `ALARM` and the buzzer sounds
-- The Thingsboard dashboard charts live deviation
+- The local dashboard at http://localhost:8000 shows the node as an untagged (real) channel
 - `docs/RESULTS.md` has real numbers, not zeros
 
 Next: [05-integration-testing.md](05-integration-testing.md)

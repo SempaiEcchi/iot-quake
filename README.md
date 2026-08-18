@@ -69,8 +69,11 @@ Buzzer ──────  GPIO25
                                      └──► dashboard ──► http://localhost:8000
 ```
 
-The dashboard subscribes to the broker directly, not through the correlator — detection never
-depends on a browser being open. The broker stays local so the demo survives an internet outage — events, correlation, alarm,
+**`dashboard/server.py` is the presentation layer** — one self-contained page at
+`localhost:8000`, no account and no external service, working with the network unplugged.
+Thingsboard is wired up behind `docker compose --profile cloud` if a rubric wants a named IoT
+platform, but nothing depends on it. The dashboard subscribes to the broker directly, not
+through the correlator — detection never depends on a browser being open. The broker stays local so the demo survives an internet outage — events, correlation, alarm,
 and buzzer all keep working; only the cloud dashboard goes blank. The correlator forwards to
 Thingsboard rather than the firmware doing it, which keeps the node plaintext with no TLS.
 

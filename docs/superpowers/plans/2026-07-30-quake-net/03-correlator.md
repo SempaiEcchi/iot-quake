@@ -10,6 +10,10 @@
 
 **No hardware needed.** Do all of this while parts ship.
 
+> **Status: built.** `correlator/`, `sim/` and `dashboard/` are implemented and tested — 23
+> Python tests pass. This plan is kept as the record of what was built and why. To just run it,
+> see [../../../TESTING.md](../../../TESTING.md).
+
 ## Global Constraints
 
 See [00-index.md](00-index.md#global-constraints). Relevant here:
@@ -572,9 +576,47 @@ mid-demo, the buzzer still has to fire.
 
 ---
 
+### Task 7: Live dashboard
+
+**Files:**
+- Create: `dashboard/server.py`
+- Create: `dashboard/test_dashboard.py`
+
+The presentation layer: one self-contained page, no build step and no CDN, pushed over
+server-sent events.
+
+It subscribes to the broker **directly rather than reading from the correlator**. Detection must
+not depend on whether a browser is open — killing the dashboard changes nothing about whether an
+alarm fires. That independence is the whole reason it is a separate process.
+
+Its headline number is **single-channel events rejected**: events that never became part of an
+alarm. Each would have been a false alarm on a single-channel design, which makes it the
+measured value of the correlation rule and the strongest figure for the report.
+
+- [ ] **Step 1: Implement the server** — see `dashboard/server.py` for the built version
+- [ ] **Step 2: Run it**
+
+```bash
+python dashboard/server.py --broker localhost
+open http://localhost:8000
+```
+
+- [ ] **Step 3: Test it**
+
+```bash
+pytest dashboard -q
+```
+
+Expected: `6 passed`. The tests start the real server, publish real MQTT, and read the real HTTP
+endpoint. They assert **deltas** rather than absolute counts, because the dashboard aggregates
+every publisher on the broker — a forgotten mock node would otherwise break them.
+
+---
+
 ## Done when
 
 - `cd correlator && python -m pytest test_core.py -v` → `8 passed`
+- `pytest dashboard -q` → `6 passed`, and http://localhost:8000 renders
 - `python main.py --broker 127.0.0.1` fails on the *local* broker, not in your own code
 - `grep -n subscribe correlator/fake_node.py` finds nothing
 - A manual `mosquitto_pub` to Thingsboard shows up in Latest telemetry

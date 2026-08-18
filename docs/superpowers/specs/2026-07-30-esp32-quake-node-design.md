@@ -7,7 +7,8 @@ Status: Approved for planning. Revised 2026-07-30 after grilling — see Revisio
 
 Build one network-ready earthquake-detection node, for a university IoT course in Japan. The
 node publishes shake events over MQTT. A correlator declares an earthquake only when two
-distinct channels agree within a short time window, and forwards results to a cloud dashboard.
+distinct channels agree within a short time window, and a local web dashboard shows the result
+live.
 
 The correlation rule is the point of the project. A single accelerometer cannot tell a passing
 truck from a quake. Two agreeing channels can, because local noise is local and ground motion
@@ -31,7 +32,8 @@ drift.
 | NTP time synchronisation | The correlator timestamps events on arrival. MQTT latency is ~100 ms against a 2 s window, so node-side clocks are unnecessary. |
 | JMA calculated seismic intensity (計測震度) | The official algorithm needs a specified frequency-domain filter and the 0.3 s rule. Out of proportion to the course. Report peak acceleration in gal instead. |
 | Epicentre location / triangulation | Requires sub-millisecond timing. Impossible over WiFi, and impossible with one sensor. Must not be claimed. |
-| Cloud MQTT broker | The broker is Mosquitto on the laptop. Nodes stay plaintext with no TLS, and the demo survives an internet outage — only the dashboard goes blank. The correlator forwards to the cloud instead. |
+| Cloud MQTT broker | The broker is Mosquitto in Docker on the laptop. Nodes stay plaintext with no TLS, and the demo survives an internet outage entirely. |
+| A hosted dashboard as the primary UI | `dashboard/server.py` is the presentation layer: no account, no external service, no build step, and it works with the network unplugged. Thingsboard remains wired up behind `--profile cloud` for anyone whose rubric wants a named IoT platform, but nothing depends on it. |
 | OLED display, microSD logging, battery power | No function the web dashboard does not already provide. |
 | Hardware-timer sampling ISR | A two-line gate resync closes the same failure mode. See Sampling. |
 

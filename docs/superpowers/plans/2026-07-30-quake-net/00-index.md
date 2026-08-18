@@ -9,12 +9,12 @@ Six plans. Run them in order — each depends on the one before.
 |---|---|---|---|
 | 01 | [Procurement & assembly](01-procurement-and-assembly.md) | Wired node, I2C verified | — |
 | 02 | [Node firmware](02-node-firmware.md) | Sketch that detects and publishes | 01 |
-| 03 | [Correlator & simulated node](03-correlator.md) | Python services, host-tested | — (parallel with 01/02) |
+| 03 | [Correlator, simulated node & dashboard](03-correlator.md) | Python services, host-tested | — (parallel with 01/02) |
 | 04 | [Bringup & calibration](04-bringup-and-calibration.md) | Node live, threshold measured, dashboard up | 01, 02, 03 |
 | 05 | [Integration testing](05-integration-testing.md) | Six spec tests passing, results recorded | 04 |
 | 06 | [Public release](06-public-release.md) | Public GitHub repo | 05 |
 
-Plan 03 needs no hardware — write it while parts ship.
+Plan 03 needs no hardware and is **already built** — see [../../../TESTING.md](../../../TESTING.md) to run it.
 
 ## Order rationale
 
@@ -28,11 +28,14 @@ measures. Do not guess thresholds to unblock 05.
 ## Architecture
 
 ```
-[ESP32 + MPU6050] ──┐
-                    ├──► Mosquitto ──► correlator ──┬──► quake/alarm ──► buzzer
-[fake_node.py]    ──┘     (laptop)                  └──► Thingsboard (dashboard)
-   (laptop)
+[ESP32 + MPU6050] ──┐                     ┌──► quake/alarm ──► buzzer
+                    ├──► Mosquitto ──┬──► correlator ──┴──► Thingsboard (optional cloud)
+[fake_node.py]    ──┘    (laptop)    │
+[mock_node.py]    ──┘                └──► dashboard ──► http://localhost:8000
 ```
+
+The broker runs in Docker (`docker compose up -d`). `mock_node.py` is a full stand-in for the
+ESP32 — same algorithm, same MQTT contract — so the entire system runs with no hardware.
 
 Channel A is the real ESP32. **Channel B is simulated** — only one ESP32 is available.
 `fake_node.py` speaks the same MQTT contract, so a real second node is a later drop-in.
@@ -48,6 +51,7 @@ wires it to the world.
 |---|---|
 | `firmware/node/detector.cpp` — no Arduino headers | `firmware/node/node.ino` — Wire, WiFi, MQTT |
 | `correlator/core.py` — no network | `correlator/main.py` — paho-mqtt, Thingsboard |
+| `sim/detector.py` — port of detector.cpp | `sim/mock_node.py`, `dashboard/server.py` |
 
 The cores are unit-tested on your laptop. The shells are verified by hand in plans 04–05. This
 split is why a hardware project can have real tests at all, and it is worth a paragraph in your
@@ -74,8 +78,18 @@ correlator/
   main.py           paho-mqtt shell + Thingsboard bridge
   fake_node.py      Simulated second channel
   test_core.py      pytest unit tests
-  mosquitto.conf
   requirements.txt
+dashboard/
+  server.py         Live web dashboard — MQTT in, HTTP/SSE out
+  test_dashboard.py pytest, drives the real server
+sim/
+  detector.py       Python port of detector.cpp
+  mock_node.py      Mock ESP32 — synthetic acceleration, real MQTT
+  test_parity.py    Port matches the firmware
+  test_e2e.py       Whole loop against the broker
+mosquitto/
+  mosquitto.conf
+docker-compose.yml  Mosquitto, plus Thingsboard behind --profile cloud
 tools/
   rms.py            Noise-floor RMS calculator
 docs/
@@ -91,8 +105,11 @@ These apply to every plan. Exact values, copied from the design.
 - **Board:** ESP32-DevKitC-32E, FQBN `esp32:esp32:esp32`
 - **Sampling:** 100 Hz (10 000 µs period), gated on `micros()`, **resyncing** rather than
   catching up when more than 10 periods behind
-- **Socket timeout:** `mqtt.setSocketTimeout(2)` — PubSubClient's default blocks 15 s
-- **Sensor:** MPU6050 at I2C address `0x68`, ±2 g full scale, 16384 LSB/g
+- **Socket timeout:** `mqtt.setSocketTimeout(2)` — PubSubClient's default is 15 s
+- **Threshold:** 5× measured RMS for shindo 3, 10× for shindo 4. Measured, never guessed.
+- **Sensor:** MPU6050 at I2C address `0x68`, ±2 g full scale, 16384 LSB/g, **CONFIG `0x1A` =
+  `DLPF_CFG 6` → 5 Hz bandwidth** (the low-pass half of the 0.2–5 Hz band; without it the noise
+  floor is ~7× worse). `node.ino` and `calibrate.ino` must set this identically.
 - **Unit conversion:** 1 g = 980.665 gal. All acceleration in the code is gal.
 - **Pins:** SDA `GPIO21`, SCL `GPIO22`, LED `GPIO26`, buzzer `GPIO25`
 - **Detector constants:** `EMA_ALPHA` 0.01, `WARMUP_MS` 3000, `REFRACTORY_MS` 5000
@@ -115,9 +132,12 @@ These apply to every plan. Exact values, copied from the design.
 
 ## Progress
 
-- [ ] 01 Procurement & assembly
-- [ ] 02 Node firmware
-- [ ] 03 Correlator & simulated node
-- [ ] 04 Bringup & calibration
-- [ ] 05 Integration testing
-- [ ] 06 Public release
+- [ ] 01 Procurement & assembly — **blocked on parts**
+- [x] 02 Node firmware — written, unit-tested, compiles clean (not yet flashed)
+- [x] 03 Correlator, simulated node & dashboard — written and tested end to end
+- [ ] 04 Bringup & calibration — **needs hardware**
+- [ ] 05 Integration testing — **needs hardware**
+- [ ] 06 Public release — after 05
+
+Everything that does not need an ESP32 is done: 6 C++ and 23 Python tests pass, all three
+sketches compile, and the full loop runs on mock nodes. See [../../../TESTING.md](../../../TESTING.md).

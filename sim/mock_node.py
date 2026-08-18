@@ -138,6 +138,10 @@ class MockNode:
 
 
 def main():
+    # Line-buffer stdout so logs appear immediately when redirected to a
+    # file or a pipe, not just on a terminal. Without this, prints sit in
+    # the buffer and events look like they went missing.
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--broker", default="localhost")
     ap.add_argument("--port", type=int, default=1883)

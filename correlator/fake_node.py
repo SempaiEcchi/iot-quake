@@ -10,6 +10,7 @@ real one in a log or a screenshot.
 import argparse
 import json
 import random
+import sys
 import time
 
 import paho.mqtt.client as mqtt
@@ -18,6 +19,10 @@ NODE_ID = "sim-000001"
 
 
 def main() -> None:
+    # Line-buffer stdout so logs appear immediately when redirected to a
+    # file or a pipe, not just on a terminal. Without this, prints sit in
+    # the buffer and events look like they went missing.
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--broker", default="localhost")
     ap.add_argument("--port", type=int, default=1883)
@@ -38,7 +43,12 @@ def main() -> None:
 
     try:
         while True:
-            input()
+            try:
+                input()
+            except EOFError:
+                # stdin closed (piped input exhausted, or run detached).
+                # Exit quietly rather than dumping a traceback.
+                break
             peak = args.peak or round(random.uniform(20.0, 80.0), 2)
             client.publish(ev_topic, json.dumps({
                 "node": NODE_ID, "peak_gal": peak, "dur_ms": 1200,

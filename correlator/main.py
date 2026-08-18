@@ -8,6 +8,7 @@ internet does not.
 import argparse
 import json
 import os
+import sys
 import time
 
 import paho.mqtt.client as mqtt
@@ -43,6 +44,10 @@ def connect_thingsboard(host: str, port: int, token: str | None):
 
 
 def main() -> None:
+    # Line-buffer stdout so logs appear immediately when redirected to a
+    # file or a pipe, not just on a terminal. Without this, prints sit in
+    # the buffer and events look like they went missing.
+    sys.stdout.reconfigure(line_buffering=True)
     ap = argparse.ArgumentParser()
     ap.add_argument("--broker", default="localhost", help="broker host or IP")
     ap.add_argument("--port", type=int, default=1883)
@@ -97,7 +102,7 @@ def main() -> None:
             return
 
         now = time.monotonic()
-        print(f"event  {node_id}  peak={peak:.2f} gal", flush=True)
+        print(f"event  {node_id}  peak={peak:.2f} gal")
         to_cloud({"event_node": node_id, "event_peak_gal": peak})
 
         alarm = corr.add_event(node_id, peak, now)
@@ -105,7 +110,7 @@ def main() -> None:
             payload = json.dumps({"nodes": alarm.nodes,
                                   "peak_gal": alarm.peak_gal})
             client.publish(ALARM_TOPIC, payload)
-            print(f"ALARM  {alarm.nodes}  peak={alarm.peak_gal:.2f} gal", flush=True)
+            print(f"ALARM  {alarm.nodes}  peak={alarm.peak_gal:.2f} gal")
             to_cloud({"alarm": 1, "alarm_peak_gal": alarm.peak_gal,
                       "alarm_nodes": ",".join(alarm.nodes)})
 

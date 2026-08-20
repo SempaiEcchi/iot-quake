@@ -33,9 +33,27 @@
 #define TEL_MS       1000     // telemetry at 1 Hz
 #define BUZZ_MS      1500     // alarm buzz length
 
+// Simulated-sensor mode. When no MPU6050 answers, the node synthesises
+// acceleration instead of dropping out of the network: gravity plus noise,
+// and a burst on demand. Everything downstream -- the detector, the event
+// payload, the correlator -- is the real code path, so the only difference
+// from a wired node is where the numbers come from. The shake alternates sign
+// each sample so the EMA high-pass cannot track it out, matching mock_node.py.
+#define BOOT_BTN       0      // FNK0090 BOOT button, active low
+#define SIM_NOISE_GAL  0.30f
+#define SIM_SHAKE_GAL  80.0f
+#define SIM_SHAKE_MS   800
+#define SIM_AUTO_MS    12000  // shake on a timer too, so the node runs unattended
+
 WiFiClient   net;
 PubSubClient mqtt(net);
 Detector     det;
+
+bool have_sensor = false;
+uint32_t next_sensor_retry_ms = 0;
+uint32_t shake_until_ms = 0, btn_ok_ms = 0, next_auto_shake_ms = 0;
+uint32_t sim_rng = 0x5eed1234;
+uint32_t sim_parity = 0;
 
 char node_id[16];
 char topic_event[48], topic_tel[48];
@@ -78,12 +96,41 @@ static bool mpu_read_mag(float* mag_gal) {
   return true;
 }
 
+// ---------- simulated sensor ----------
+
+static float sim_unit() {          // cheap LCG, 0..1
+  sim_rng = sim_rng * 1664525u + 1013904223u;
+  return (float)((sim_rng >> 8) & 0xFFFF) / 65535.0f;
+}
+
+static bool sim_read_mag(float* mag_gal) {
+  float shake = 0.0f;
+  if (shake_until_ms) {
+    if (millis() < shake_until_ms)
+      shake = (sim_parity++ & 1) ? SIM_SHAKE_GAL : -SIM_SHAKE_GAL;
+    else
+      shake_until_ms = 0;
+  }
+  *mag_gal = GAL_PER_G + (sim_unit() - 0.5f) * 2.0f * SIM_NOISE_GAL + shake;
+  return true;
+}
+
+// BOOT button injects a shake, so the node can be triggered by hand in a demo.
+static void poll_button() {
+  if (digitalRead(BOOT_BTN) != LOW) return;
+  if (millis() < btn_ok_ms) return;
+  btn_ok_ms = millis() + 400;              // debounce
+  shake_until_ms = millis() + SIM_SHAKE_MS;
+  Serial.println("BOOT pressed - injecting shake");
+}
+
 // ---------- network ----------
 
 static void on_message(char* topic, byte* payload, unsigned int len) {
   (void)payload; (void)len;
   if (strcmp(topic, "quake/alarm") == 0) {
     digitalWrite(BUZZER_PIN, HIGH);
+    digitalWrite(LED_PIN, HIGH);           // visible alarm as well as audible
     buzz_until_ms = millis() + BUZZ_MS;
   }
 }
@@ -111,6 +158,15 @@ static void net_pump() {
   mqtt.loop();
 }
 
+static void publish_tel() {
+  if (millis() < next_tel_ms) return;
+  next_tel_ms = millis() + TEL_MS;
+  char buf[96];
+  snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"dev_gal\":%.2f,\"uptime_s\":%lu}",
+           node_id, last_dev, (unsigned long)(millis() / 1000));
+  mqtt.publish(topic_tel, buf);
+}
+
 // ---------- setup / loop ----------
 
 void setup() {
@@ -123,14 +179,22 @@ void setup() {
   Wire.begin(SDA_PIN, SCL_PIN);
   Wire.setClock(400000);
 
-  while (!mpu_init()) {                 // blink fast until the sensor answers
-    Serial.println("MPU6050 not responding - check wiring");
-    for (int i = 0; i < 5; i++) {
+  // Try the sensor, but do not block on it. Without an MPU6050 this node still
+  // joins the network and sounds the buzzer on quake/alarm, which is the whole
+  // alarm path minus detection. loop() keeps retrying, so plugging the sensor
+  // in later brings detection up with no reflash.
+  for (int i = 0; i < 10 && !have_sensor; i++) {
+    have_sensor = mpu_init();
+    if (!have_sensor) {
       digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-      delay(100);
+      delay(200);
     }
   }
   digitalWrite(LED_PIN, LOW);
+  pinMode(BOOT_BTN, INPUT_PULLUP);
+  Serial.println(have_sensor
+    ? "MPU6050 ok"
+    : "MPU6050 not responding - SIMULATED SENSOR, press BOOT to shake");
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -155,7 +219,28 @@ void loop() {
 
   if (buzz_until_ms && millis() > buzz_until_ms) {
     digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(LED_PIN, LOW);
     buzz_until_ms = 0;
+  }
+
+  if (!have_sensor) {
+    poll_button();
+    if (millis() > next_auto_shake_ms) {
+      next_auto_shake_ms = millis() + SIM_AUTO_MS;
+      shake_until_ms = millis() + SIM_SHAKE_MS;
+    }
+    // Keep probing. A sensor plugged in later takes over from the simulation
+    // with no reflash; the detector is re-initialised so the EMA baseline
+    // reseeds from real readings instead of inheriting synthetic ones.
+    if (millis() > next_sensor_retry_ms) {
+      next_sensor_retry_ms = millis() + 5000;
+      if (mpu_init()) {
+        have_sensor = true;
+        detector_init(&det, THRESHOLD_GAL);
+        next_sample_us = micros();
+        Serial.println("MPU6050 came up - real sensor now driving detection");
+      }
+    }
   }
 
   // 100 Hz gate. Runs regardless of network state - detection never stops.
@@ -172,7 +257,8 @@ void loop() {
     next_sample_us += SAMPLE_US;
 
   float mag;
-  if (!mpu_read_mag(&mag)) return;      // skip this sample, never publish garbage
+  bool ok = have_sensor ? mpu_read_mag(&mag) : sim_read_mag(&mag);
+  if (!ok) return;                      // skip this sample, never publish garbage
 
   DetectorOut o = detector_update(&det, mag, millis());
   last_dev = o.dev_gal;
@@ -188,11 +274,5 @@ void loop() {
                   (unsigned long)o.dur_ms);
   }
 
-  if (millis() > next_tel_ms) {
-    next_tel_ms = millis() + TEL_MS;
-    char buf[96];
-    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"dev_gal\":%.2f,\"uptime_s\":%lu}",
-             node_id, last_dev, (unsigned long)(millis() / 1000));
-    mqtt.publish(topic_tel, buf);
-  }
+  publish_tel();
 }

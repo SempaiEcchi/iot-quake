@@ -285,6 +285,11 @@ void loop() {
     float mag;
     bool ok = c->present ? mpu_read_mag(c->addr, &mag) : sim_read_mag(c, &mag);
     if (!ok) {                          // sensor dropped off the bus mid-run
+      // Say so. A silent fallback to simulation is the worst outcome here:
+      // the channel keeps publishing plausible events that are not
+      // measurements, and nothing downstream can tell the difference.
+      Serial.printf("%s: I2C read failed at 0x%02X - falling back to simulation\n",
+                    c->id, c->addr);
       c->present = false;
       continue;                         // never publish garbage
     }

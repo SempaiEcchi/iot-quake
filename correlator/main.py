@@ -15,9 +15,14 @@ import paho.mqtt.client as mqtt
 
 from core import Correlator
 
-EVENT_SUB = "quake/+/event"
-TEL_SUB = "quake/+/tel"
-ALARM_TOPIC = "quake/alarm"
+# Topic namespace. Every publisher and subscriber in this system shares it, so
+# two deployments -- or a test run and live hardware -- can use one broker
+# without correlating each other's events into false alarms.
+PREFIX = os.environ.get("QUAKE_PREFIX", "quake")
+
+EVENT_SUB = f"{PREFIX}/+/event"
+TEL_SUB = f"{PREFIX}/+/tel"
+ALARM_TOPIC = f"{PREFIX}/alarm"
 TB_TELEMETRY = "v1/devices/me/telemetry"
 
 

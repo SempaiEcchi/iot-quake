@@ -21,6 +21,13 @@ ROOT = Path(__file__).resolve().parent.parent
 BROKER = os.environ.get("QUAKE_BROKER", "localhost")
 PORT = int(os.environ.get("QUAKE_PORT", "1883"))
 
+# Isolate this run in its own topic namespace. The broker is shared: real
+# hardware may be publishing on quake/ at the same time, and a live node would
+# correlate with this test's single channel and turn the no-alarm assertion
+# into a false failure. A per-run prefix makes the tests independent of
+# whatever else is connected.
+PREFIX = f"quaketest{os.getpid()}"
+
 # Speed-ups so a test takes seconds, not half a minute. The algorithm is
 # unchanged; only the two timing constants shrink.
 FAST = ["--warmup-ms", "500", "--refractory-ms", "1000",
@@ -53,6 +60,9 @@ class Runner:
         env = dict(os.environ)
         env.pop("TB_TOKEN", None)          # keep the cloud out of the test
         env["PYTHONUNBUFFERED"] = "1"
+        env["QUAKE_PREFIX"] = PREFIX       # per-child, never os.environ: two
+                                           # test modules in one session would
+                                           # otherwise overwrite each other
         p = subprocess.Popen(
             [sys.executable, *argv], cwd=cwd, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

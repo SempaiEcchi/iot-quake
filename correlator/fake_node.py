@@ -7,6 +7,7 @@ and the single-node rejection test would be impossible to run.
 The ID is prefixed 'sim-' so a simulated channel can never be mistaken for a
 real one in a log or a screenshot.
 """
+import os
 import argparse
 import json
 import random
@@ -14,6 +15,12 @@ import sys
 import time
 
 import paho.mqtt.client as mqtt
+
+# Topic namespace. Every publisher and subscriber in this system shares it, so
+# two deployments -- or a test run and live hardware -- can use one broker
+# without correlating each other's events into false alarms.
+PREFIX = os.environ.get("QUAKE_PREFIX", "quake")
+
 
 NODE_ID = "sim-000001"
 
@@ -34,8 +41,8 @@ def main() -> None:
     client.connect(args.broker, args.port, keepalive=60)
     client.loop_start()
 
-    ev_topic = f"quake/{NODE_ID}/event"
-    tel_topic = f"quake/{NODE_ID}/tel"
+    ev_topic = f"{PREFIX}/{NODE_ID}/event"
+    tel_topic = f"{PREFIX}/{NODE_ID}/tel"
     started = time.monotonic()
 
     print(f"{NODE_ID} ready. Enter = publish event, Ctrl-C = quit.")

@@ -10,6 +10,7 @@ a browser is watching. Killing this process must not change detection.
   python dashboard/server.py --broker localhost
   open http://localhost:8000
 """
+import os
 import argparse
 import json
 import queue
@@ -20,6 +21,12 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import paho.mqtt.client as mqtt
+
+# Topic namespace. Every publisher and subscriber in this system shares it, so
+# two deployments -- or a test run and live hardware -- can use one broker
+# without correlating each other's events into false alarms.
+PREFIX = os.environ.get("QUAKE_PREFIX", "quake")
+
 
 TRACE_LEN = 120          # dev_gal samples kept per channel (~2 min at 1 Hz)
 EVENT_LOG_LEN = 25
@@ -72,9 +79,9 @@ def snapshot() -> str:
 
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"dashboard: broker connected ({reason_code})")
-    client.subscribe("quake/+/tel")
-    client.subscribe("quake/+/event")
-    client.subscribe("quake/alarm")
+    client.subscribe(f"{PREFIX}/+/tel")
+    client.subscribe(f"{PREFIX}/+/event")
+    client.subscribe(f"{PREFIX}/alarm")
 
 
 def on_message(client, userdata, msg):
@@ -85,7 +92,7 @@ def on_message(client, userdata, msg):
     parts = msg.topic.split("/")
     now = time.monotonic()
 
-    if msg.topic == "quake/alarm":
+    if msg.topic == f"{PREFIX}/alarm":
         with state_lock:
             last_alarm["at"] = now
             last_alarm["nodes"] = data.get("nodes", [])

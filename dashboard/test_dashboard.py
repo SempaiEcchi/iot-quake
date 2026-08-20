@@ -21,6 +21,13 @@ BROKER = os.environ.get("QUAKE_BROKER", "localhost")
 PORT = int(os.environ.get("QUAKE_PORT", "1883"))
 HTTP_PORT = 8077                      # not 8000, so a dev server can stay up
 
+# Own topic namespace, for the same reason as sim/test_e2e.py: the broker is
+# shared with live hardware. This also has to be set rather than inherited --
+# importing test_e2e in the same session would otherwise hand this file that
+# module's prefix, and the server would subscribe somewhere these tests never
+# publish.
+PREFIX = f"dashtest{os.getpid()}"
+
 
 def broker_up() -> bool:
     try:
@@ -49,7 +56,7 @@ def get(path: str, tries: int = 25):
 
 @pytest.fixture
 def server():
-    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    env = {**os.environ, "PYTHONUNBUFFERED": "1", "QUAKE_PREFIX": PREFIX}
     p = subprocess.Popen(
         [sys.executable, "dashboard/server.py", "--broker", BROKER,
          "--port", str(PORT), "--http-port", str(HTTP_PORT)],
@@ -104,7 +111,7 @@ def test_serves_page(server):
 
 
 def test_telemetry_creates_a_channel(server, pub):
-    pub.publish("quake/node-test1/tel",
+    pub.publish(f"{PREFIX}/node-test1/tel",
                 json.dumps({"node": "node-test1", "dev_gal": 1.25,
                             "uptime_s": 42}))
     s = wait_for(lambda s: any(c["id"] == "node-test1" for c in s["channels"]))
@@ -116,7 +123,7 @@ def test_telemetry_creates_a_channel(server, pub):
 
 
 def test_simulated_channels_are_flagged(server, pub):
-    pub.publish("quake/sim-000001/tel",
+    pub.publish(f"{PREFIX}/sim-000001/tel",
                 json.dumps({"node": "sim-000001", "dev_gal": 0.5,
                             "uptime_s": 1}))
     s = wait_for(lambda s: any(c["id"] == "sim-000001" for c in s["channels"]))
@@ -128,7 +135,7 @@ def test_rejected_counts_events_that_never_alarmed(server, pub):
     """The headline metric: events correlation threw away."""
     base = baseline()
     for i in range(3):
-        pub.publish("quake/node-lonely/event",
+        pub.publish(f"{PREFIX}/node-lonely/event",
                     json.dumps({"node": "node-lonely", "peak_gal": 10.0 + i,
                                 "dur_ms": 100}))
         time.sleep(0.1)
@@ -139,11 +146,11 @@ def test_rejected_counts_events_that_never_alarmed(server, pub):
 
 def test_alarm_sets_banner_and_is_not_counted_as_rejected(server, pub):
     base = baseline()
-    pub.publish("quake/node-a/event",
+    pub.publish(f"{PREFIX}/node-a/event",
                 json.dumps({"node": "node-a", "peak_gal": 20.0, "dur_ms": 100}))
-    pub.publish("quake/node-b/event",
+    pub.publish(f"{PREFIX}/node-b/event",
                 json.dumps({"node": "node-b", "peak_gal": 30.0, "dur_ms": 100}))
-    pub.publish("quake/alarm",
+    pub.publish(f"{PREFIX}/alarm",
                 json.dumps({"nodes": ["node-a", "node-b"], "peak_gal": 30.0}))
 
     s = wait_for(lambda s: s["counters"]["alarms"] - base["alarms"] == 1)
@@ -155,8 +162,8 @@ def test_alarm_sets_banner_and_is_not_counted_as_rejected(server, pub):
 
 
 def test_malformed_payload_does_not_crash(server, pub):
-    pub.publish("quake/node-bad/tel", b"not json at all")
-    pub.publish("quake/node-good/tel",
+    pub.publish(f"{PREFIX}/node-bad/tel", b"not json at all")
+    pub.publish(f"{PREFIX}/node-good/tel",
                 json.dumps({"node": "node-good", "dev_gal": 1.0, "uptime_s": 1}))
     s = wait_for(lambda s: any(c["id"] == "node-good" for c in s["channels"]))
     assert not any(c["id"] == "node-bad" for c in s["channels"])

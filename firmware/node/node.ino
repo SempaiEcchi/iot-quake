@@ -1,6 +1,16 @@
 // firmware/node/node.ino
 // Networked shake node. Samples at 100 Hz, publishes events over MQTT.
-// The ID comes from the WiFi MAC, so this is drop-in for additional nodes.
+//
+// Drives up to two MPU6050s on one I2C bus, addressed 0x68 and 0x69 (AD0 low
+// and high). Each sensor is an independent channel with its own detector and
+// its own node ID, so the correlator sees two agreeing sources exactly as it
+// would with two separate boards. No Python mock is needed.
+//
+// Co-located sensors are a weaker claim than separated ones: two modules on
+// the same breadboard feel the same table bump, so agreement between them
+// rejects single-sensor electrical glitches but not shared mechanical noise.
+// Run the second sensor on a metre or two of wire to a different surface and
+// the correlation becomes meaningful. See docs/wiring.md.
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -9,10 +19,9 @@
 
 #define SDA_PIN      26
 #define SCL_PIN      27
-#define LED_PIN      2      // onboard LED on the FNK0090 (LED_IO2), no discrete LED needed
+#define LED_PIN      2      // onboard LED on the FNK0090 (LED_IO2)
 #define BUZZER_PIN   25
 
-#define MPU_ADDR       0x68   // 0x69 if your scan found AD0 pulled high
 #define REG_PWR_MGMT   0x6B
 #define REG_CONFIG     0x1A
 #define REG_ACCEL_CFG  0x1C
@@ -32,60 +41,77 @@
 #define SAMPLE_US    10000    // 100 Hz
 #define TEL_MS       1000     // telemetry at 1 Hz
 #define BUZZ_MS      1500     // alarm buzz length
+#define RETRY_MS     5000     // how often to re-probe a missing sensor
 
-// Simulated-sensor mode. When no MPU6050 answers, the node synthesises
-// acceleration instead of dropping out of the network: gravity plus noise,
-// and a burst on demand. Everything downstream -- the detector, the event
-// payload, the correlator -- is the real code path, so the only difference
-// from a wired node is where the numbers come from. The shake alternates sign
-// each sample so the EMA high-pass cannot track it out, matching mock_node.py.
+// Simulated-sensor mode. A channel whose MPU6050 does not answer synthesises
+// acceleration instead of going dark: gravity plus noise, with a burst on
+// demand. Everything downstream -- detector, event payload, correlator -- is
+// the real code path, so only the source of the numbers differs. The shake
+// alternates sign each sample so the EMA high-pass cannot track it out.
+//
+// Both channels shake together, which is what two co-located sensors would
+// genuinely do. That means an all-simulated node self-correlates: it is a
+// demo mode, not evidence. A channel stops simulating the moment its sensor
+// answers, so this fades out on its own as hardware arrives.
 #define BOOT_BTN       0      // FNK0090 BOOT button, active low
 #define SIM_NOISE_GAL  0.30f
 #define SIM_SHAKE_GAL  80.0f
 #define SIM_SHAKE_MS   800
-#define SIM_AUTO_MS    12000  // shake on a timer too, so the node runs unattended
+#define SIM_AUTO_MS    12000
+
+#define NCHAN 2
+
+struct Channel {
+  uint8_t  addr;
+  char     suffix;
+  bool     present;
+  Detector det;
+  char     id[20];
+  char     topic_event[56];
+  char     topic_tel[56];
+  float    last_dev;
+  uint32_t sim_rng;
+  uint32_t sim_parity;
+};
 
 WiFiClient   net;
 PubSubClient mqtt(net);
-Detector     det;
 
-bool have_sensor = false;
-uint32_t next_sensor_retry_ms = 0;
-uint32_t shake_until_ms = 0, btn_ok_ms = 0, next_auto_shake_ms = 0;
-uint32_t sim_rng = 0x5eed1234;
-uint32_t sim_parity = 0;
+Channel chan[NCHAN] = {
+  {0x68, 'a', false, {}, "", "", "", 0.0f, 0x5eed1234, 0},
+  {0x69, 'b', false, {}, "", "", "", 0.0f, 0x1234beef, 0},
+};
 
-char node_id[16];
-char topic_event[48], topic_tel[48];
+char     base_id[16];
 uint32_t next_sample_us = 0, next_tel_ms = 0, buzz_until_ms = 0;
-uint32_t last_reconnect_ms = 0;
-float last_dev = 0.0f;
+uint32_t last_reconnect_ms = 0, next_retry_ms = 0;
+uint32_t shake_until_ms = 0, btn_ok_ms = 0, next_auto_shake_ms = 0;
 
 // ---------- sensor ----------
 
-static bool mpu_init() {
-  Wire.beginTransmission(MPU_ADDR);
+static bool mpu_init(uint8_t addr) {
+  Wire.beginTransmission(addr);
   Wire.write(REG_PWR_MGMT);
   Wire.write(0x00);                    // wake from sleep
   if (Wire.endTransmission() != 0) return false;
 
-  Wire.beginTransmission(MPU_ADDR);
+  Wire.beginTransmission(addr);
   Wire.write(REG_CONFIG);
   Wire.write(DLPF_5HZ);                // band-limit to 5 Hz -- see above
   if (Wire.endTransmission() != 0) return false;
 
-  Wire.beginTransmission(MPU_ADDR);
+  Wire.beginTransmission(addr);
   Wire.write(REG_ACCEL_CFG);
   Wire.write(0x00);                    // +-2 g
   return Wire.endTransmission() == 0;
 }
 
 // Magnitude of the acceleration vector, in gal. Returns false on I2C failure.
-static bool mpu_read_mag(float* mag_gal) {
-  Wire.beginTransmission(MPU_ADDR);
+static bool mpu_read_mag(uint8_t addr, float* mag_gal) {
+  Wire.beginTransmission(addr);
   Wire.write(REG_ACCEL_XOUT);
   if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(MPU_ADDR, 6) != 6) return false;
+  if (Wire.requestFrom((int)addr, 6) != 6) return false;
 
   int16_t x = (Wire.read() << 8) | Wire.read();
   int16_t y = (Wire.read() << 8) | Wire.read();
@@ -98,20 +124,16 @@ static bool mpu_read_mag(float* mag_gal) {
 
 // ---------- simulated sensor ----------
 
-static float sim_unit() {          // cheap LCG, 0..1
-  sim_rng = sim_rng * 1664525u + 1013904223u;
-  return (float)((sim_rng >> 8) & 0xFFFF) / 65535.0f;
+static float sim_unit(Channel* c) {          // cheap LCG, 0..1
+  c->sim_rng = c->sim_rng * 1664525u + 1013904223u;
+  return (float)((c->sim_rng >> 8) & 0xFFFF) / 65535.0f;
 }
 
-static bool sim_read_mag(float* mag_gal) {
+static bool sim_read_mag(Channel* c, float* mag_gal) {
   float shake = 0.0f;
-  if (shake_until_ms) {
-    if (millis() < shake_until_ms)
-      shake = (sim_parity++ & 1) ? SIM_SHAKE_GAL : -SIM_SHAKE_GAL;
-    else
-      shake_until_ms = 0;
-  }
-  *mag_gal = GAL_PER_G + (sim_unit() - 0.5f) * 2.0f * SIM_NOISE_GAL + shake;
+  if (shake_until_ms && millis() < shake_until_ms)
+    shake = (c->sim_parity++ & 1) ? SIM_SHAKE_GAL : -SIM_SHAKE_GAL;
+  *mag_gal = GAL_PER_G + (sim_unit(c) - 0.5f) * 2.0f * SIM_NOISE_GAL + shake;
   return true;
 }
 
@@ -151,7 +173,7 @@ static void net_pump() {
   if (!mqtt.connected()) {
     if (millis() - last_reconnect_ms > 2000) {
       last_reconnect_ms = millis();
-      if (mqtt.connect(node_id)) mqtt.subscribe("quake/alarm");
+      if (mqtt.connect(base_id)) mqtt.subscribe("quake/alarm");
     }
     return;
   }
@@ -161,10 +183,29 @@ static void net_pump() {
 static void publish_tel() {
   if (millis() < next_tel_ms) return;
   next_tel_ms = millis() + TEL_MS;
-  char buf[96];
-  snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"dev_gal\":%.2f,\"uptime_s\":%lu}",
-           node_id, last_dev, (unsigned long)(millis() / 1000));
-  mqtt.publish(topic_tel, buf);
+  for (int i = 0; i < NCHAN; i++) {
+    char buf[96];
+    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"dev_gal\":%.2f,\"uptime_s\":%lu}",
+             chan[i].id, chan[i].last_dev, (unsigned long)(millis() / 1000));
+    mqtt.publish(chan[i].topic_tel, buf);
+  }
+}
+
+// Re-probe channels whose sensor is missing. One plugged in later takes over
+// from the simulation with no reflash; its detector is re-initialised so the
+// EMA baseline reseeds from real readings instead of inheriting synthetic ones.
+static void retry_sensors() {
+  if (millis() < next_retry_ms) return;
+  next_retry_ms = millis() + RETRY_MS;
+  for (int i = 0; i < NCHAN; i++) {
+    if (chan[i].present) continue;
+    if (mpu_init(chan[i].addr)) {
+      chan[i].present = true;
+      detector_init(&chan[i].det, THRESHOLD_GAL);
+      Serial.printf("%s: MPU6050 at 0x%02X came up - real sensor driving detection\n",
+                    chan[i].id, chan[i].addr);
+    }
+  }
 }
 
 // ---------- setup / loop ----------
@@ -173,44 +214,39 @@ void setup() {
   Serial.begin(115200);
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BOOT_BTN, INPUT_PULLUP);
   digitalWrite(LED_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
 
   Wire.begin(SDA_PIN, SCL_PIN);
-  Wire.setClock(400000);
-
-  // Try the sensor, but do not block on it. Without an MPU6050 this node still
-  // joins the network and sounds the buzzer on quake/alarm, which is the whole
-  // alarm path minus detection. loop() keeps retrying, so plugging the sensor
-  // in later brings detection up with no reflash.
-  for (int i = 0; i < 10 && !have_sensor; i++) {
-    have_sensor = mpu_init();
-    if (!have_sensor) {
-      digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-      delay(200);
-    }
-  }
-  digitalWrite(LED_PIN, LOW);
-  pinMode(BOOT_BTN, INPUT_PULLUP);
-  Serial.println(have_sensor
-    ? "MPU6050 ok"
-    : "MPU6050 not responding - SIMULATED SENSOR, press BOOT to shake");
+  // 100 kHz, not 400 kHz. Two sensors at 100 Hz is 1.2 kB/s, so bandwidth is
+  // irrelevant, and the slower edge rate is what lets the second sensor sit on
+  // a metre or two of cable at the far end of the room. Raise it only if both
+  // modules are on the same breadboard and you have a reason to.
+  Wire.setClock(100000);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   uint8_t mac[6];
   WiFi.macAddress(mac);
-  snprintf(node_id, sizeof(node_id), "node-%02x%02x%02x", mac[3], mac[4], mac[5]);
-  snprintf(topic_event, sizeof(topic_event), "quake/%s/event", node_id);
-  snprintf(topic_tel,   sizeof(topic_tel),   "quake/%s/tel",   node_id);
-  Serial.printf("id=%s threshold=%.1f gal\n", node_id, THRESHOLD_GAL);
+  snprintf(base_id, sizeof(base_id), "node-%02x%02x%02x", mac[3], mac[4], mac[5]);
+
+  for (int i = 0; i < NCHAN; i++) {
+    snprintf(chan[i].id, sizeof(chan[i].id), "%s%c", base_id, chan[i].suffix);
+    snprintf(chan[i].topic_event, sizeof(chan[i].topic_event), "quake/%s/event", chan[i].id);
+    snprintf(chan[i].topic_tel,   sizeof(chan[i].topic_tel),   "quake/%s/tel",   chan[i].id);
+    chan[i].present = mpu_init(chan[i].addr);
+    detector_init(&chan[i].det, THRESHOLD_GAL);
+    Serial.printf("%s at 0x%02X: %s\n", chan[i].id, chan[i].addr,
+                  chan[i].present ? "MPU6050 ok" : "no sensor - SIMULATED");
+  }
+  Serial.printf("threshold=%.1f gal\n", THRESHOLD_GAL);
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(on_message);
   mqtt.setSocketTimeout(2);   // default is 15 s, which stalls loop() hard
 
-  detector_init(&det, THRESHOLD_GAL);
   next_sample_us = micros();
 }
 
@@ -223,25 +259,12 @@ void loop() {
     buzz_until_ms = 0;
   }
 
-  if (!have_sensor) {
-    poll_button();
-    if (millis() > next_auto_shake_ms) {
-      next_auto_shake_ms = millis() + SIM_AUTO_MS;
-      shake_until_ms = millis() + SIM_SHAKE_MS;
-    }
-    // Keep probing. A sensor plugged in later takes over from the simulation
-    // with no reflash; the detector is re-initialised so the EMA baseline
-    // reseeds from real readings instead of inheriting synthetic ones.
-    if (millis() > next_sensor_retry_ms) {
-      next_sensor_retry_ms = millis() + 5000;
-      if (mpu_init()) {
-        have_sensor = true;
-        detector_init(&det, THRESHOLD_GAL);
-        next_sample_us = micros();
-        Serial.println("MPU6050 came up - real sensor now driving detection");
-      }
-    }
+  poll_button();
+  if (millis() > next_auto_shake_ms) {
+    next_auto_shake_ms = millis() + SIM_AUTO_MS;
+    shake_until_ms = millis() + SIM_SHAKE_MS;
   }
+  retry_sensors();
 
   // 100 Hz gate. Runs regardless of network state - detection never stops.
   if ((int32_t)(micros() - next_sample_us) < 0) return;
@@ -256,22 +279,27 @@ void loop() {
   else
     next_sample_us += SAMPLE_US;
 
-  float mag;
-  bool ok = have_sensor ? mpu_read_mag(&mag) : sim_read_mag(&mag);
-  if (!ok) return;                      // skip this sample, never publish garbage
+  uint32_t now = millis();
+  for (int i = 0; i < NCHAN; i++) {
+    Channel* c = &chan[i];
+    float mag;
+    bool ok = c->present ? mpu_read_mag(c->addr, &mag) : sim_read_mag(c, &mag);
+    if (!ok) {                          // sensor dropped off the bus mid-run
+      c->present = false;
+      continue;                         // never publish garbage
+    }
 
-  DetectorOut o = detector_update(&det, mag, millis());
-  last_dev = o.dev_gal;
+    DetectorOut o = detector_update(&c->det, mag, now);
+    c->last_dev = o.dev_gal;
 
-  if (o.started)    digitalWrite(LED_PIN, HIGH);
-  if (o.event_done) {
-    digitalWrite(LED_PIN, LOW);
-    char buf[96];
-    snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"peak_gal\":%.2f,\"dur_ms\":%lu}",
-             node_id, o.peak_gal, (unsigned long)o.dur_ms);
-    mqtt.publish(topic_event, buf);     // drops silently if disconnected
-    Serial.printf("EVENT peak=%.2f gal dur=%lu ms\n", o.peak_gal,
-                  (unsigned long)o.dur_ms);
+    if (o.event_done) {
+      char buf[112];
+      snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"peak_gal\":%.2f,\"dur_ms\":%lu}",
+               c->id, o.peak_gal, (unsigned long)o.dur_ms);
+      mqtt.publish(c->topic_event, buf);  // drops silently if disconnected
+      Serial.printf("EVENT %s peak=%.2f gal dur=%lu ms\n", c->id, o.peak_gal,
+                    (unsigned long)o.dur_ms);
+    }
   }
 
   publish_tel();

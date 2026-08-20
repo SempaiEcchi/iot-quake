@@ -11,6 +11,7 @@ real load, and whether your desk is quiet enough. Those need the ESP32.
   python sim/mock_node.py --broker localhost                    # Enter = shake
   python sim/mock_node.py --broker localhost --auto-shake 8     # shake every 8 s
 """
+import os
 import argparse
 import json
 import random
@@ -22,6 +23,12 @@ import paho.mqtt.client as mqtt
 
 sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from detector import Detector, GAL_PER_G
+
+# Topic namespace. Every publisher and subscriber in this system shares it, so
+# two deployments -- or a test run and live hardware -- can use one broker
+# without correlating each other's events into false alarms.
+PREFIX = os.environ.get("QUAKE_PREFIX", "quake")
+
 
 SAMPLE_HZ = 100
 SAMPLE_DT = 1.0 / SAMPLE_HZ
@@ -38,8 +45,8 @@ class MockNode:
         self.led = False
         self.rng = random.Random(args.seed)
 
-        self.ev_topic = f"quake/{args.node_id}/event"
-        self.tel_topic = f"quake/{args.node_id}/tel"
+        self.ev_topic = f"{PREFIX}/{args.node_id}/event"
+        self.tel_topic = f"{PREFIX}/{args.node_id}/tel"
 
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.client.on_connect = self._on_connect
@@ -48,12 +55,12 @@ class MockNode:
     # ---------- MQTT ----------
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
-        client.subscribe("quake/alarm")
+        client.subscribe(f"{PREFIX}/alarm")
         print(f"[{self.a.node_id}] connected ({reason_code}), "
               f"threshold={self.a.threshold} gal")
 
     def _on_message(self, client, userdata, msg):
-        if msg.topic == "quake/alarm":
+        if msg.topic == f"{PREFIX}/alarm":
             print(f"[{self.a.node_id}] *** BUZZER *** {msg.payload.decode()}")
 
     # ---------- synthetic sensor ----------

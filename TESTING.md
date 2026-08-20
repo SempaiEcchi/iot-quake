@@ -301,3 +301,23 @@ so a forgotten `mock_node.py` inflates its counters.
 ```bash
 pgrep -fl "mock_node|fake_node|main.py --broker|dashboard/server" || echo "all stopped"
 ```
+
+## Running tests while hardware is live
+
+The broker is shared. A live node publishing on `quake/` will correlate with a
+test's single channel and turn `test_single_channel_produces_events_but_no_alarm`
+into a false failure -- it did exactly that once.
+
+Every publisher and subscriber now reads `QUAKE_PREFIX` (default `quake`), and
+each test module generates its own prefix and passes it to the processes it
+spawns. So `pytest` is safe to run with the ESP32 connected and the dashboard up.
+
+To run a second isolated stack by hand:
+
+```bash
+QUAKE_PREFIX=scratch python correlator/main.py --broker localhost
+QUAKE_PREFIX=scratch python sim/mock_node.py --broker localhost --node-id mock-1
+```
+
+Both halves must agree on the prefix. Set it on one and not the other and the
+correlator silently sees nothing.

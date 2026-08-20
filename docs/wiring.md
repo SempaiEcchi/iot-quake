@@ -229,3 +229,37 @@ at boot: high means 1.8 V. The GY-521 has onboard I2C pull-ups, so wiring either
 `GPIO12` pulls it high at every boot and the board fails to start on its 3.3 V flash. It
 looks like a dead board, not a wiring mistake. `GPIO14` is safe; `GPIO32`/`GPIO33` and
 `GPIO26`/`GPIO27` are safer still.
+
+## Second sensor (address 0x69)
+
+Two MPU6050s share one bus. `AD0` picks the address: floating or low gives `0x68`,
+tied high gives `0x69`. Sensor 1 leaves `AD0` unconnected; sensor 2 pulls it to 3.3 V.
+
+Sensor 2 goes in board 2, letters `G'`-`J'`, numbers 22-29. All five wires tap
+sensor 1's existing nodes, reachable at `C22`-`C29` on board 1:
+
+| Wire | From (sensor 1's node) | To (sensor 2) |
+|---|---|---|
+| 1 | `C22` VCC node | `VCC` |
+| 2 | `C23` GND node | `GND` |
+| 3 | `C24` SCL node | `SCL` |
+| 4 | `C25` SDA node | `SDA` |
+| 5 | `D22` VCC node again | **`AD0`** -> makes it `0x69` |
+
+The firmware probes both addresses at boot and every 5 s after, so it does not
+matter which sensor appears first or whether one is missing. Each address is an
+independent channel with its own detector and node ID: `node-<mac>a` for `0x68`,
+`node-<mac>b` for `0x69`. The correlator sees two agreeing sources and needs no
+Python mock at all.
+
+### Separate them, or the correlation is hollow
+
+Two modules on the same breadboard feel the same table bump. Agreement between
+them rejects a single sensor's electrical glitches, but not shared mechanical
+noise, which is the dominant false positive. That is a materially weaker claim
+than the design's two-separated-nodes intent.
+
+Run sensor 2 on a metre or two of wire to a different table or the far side of
+the room and the correlation becomes real. The bus clock is set to 100 kHz
+(`Wire.setClock`) specifically to survive that cable; 400 kHz will not. Two
+sensors at 100 Hz is about 1.2 kB/s, so the slower clock costs nothing.

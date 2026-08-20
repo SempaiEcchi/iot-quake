@@ -269,7 +269,16 @@ State these in the report rather than letting an examiner find them.
 - **Correlation rejects only channel-local noise.** With a real second sensor on the same desk
   it would still not reject floor-borne noise such as footsteps, which reaches every sensor.
   Only amplitude thresholds reject that.
-- **No epicentre, no official shindo.** Peak acceleration in gal only.
+- **No epicentre, and no official shindo.** The dashboard shows an *estimated* shindo derived
+  from peak acceleration. JMA's official value is not a function of peak: it comes from a
+  filtered three-component measure of acceleration sustained for 0.3 s, and systematically
+  differs. The band table lives in `correlator/core.py` and is imported by the dashboard rather
+  than copied, so the two cannot drift apart.
+- **No magnitude, ever.** Magnitude describes energy released at the source, and recovering it
+  needs epicentre distance and depth. One station's peak acceleration is equally consistent
+  with a small nearby quake and a large distant one. The cloud payload carries the literal
+  string `n/a - needs epicentre distance` rather than a blank field, because a blank column
+  invites someone to fill it in with a guess.
 - **Detection floor is around shindo 3 at a 5× threshold, shindo 4 at 10×.** Subject to the
   measured noise floor, which may be building-dominated rather than sensor-dominated.
 

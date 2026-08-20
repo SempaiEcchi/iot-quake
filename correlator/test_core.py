@@ -1,4 +1,4 @@
-from core import Correlator
+from core import Alarm, Correlator, shindo_from_gal
 
 
 def test_single_node_does_not_alarm():
@@ -60,3 +60,38 @@ def test_stale_events_are_pruned():
     for t in (10.0, 20.0, 30.0):
         assert c.add_event("node-aaa", 100.0, now=t) is None
     assert c.add_event("node-bbb", 100.0, now=40.0) is None
+
+
+# --- shindo estimation ---
+
+def test_shindo_band_boundaries():
+    # Each band is [lower, upper). Check both sides of every edge so an
+    # off-by-one in the comparison cannot pass.
+    assert shindo_from_gal(0.0) == "0"
+    assert shindo_from_gal(0.19) == "0"
+    assert shindo_from_gal(0.2) == "1"
+    assert shindo_from_gal(0.79) == "1"
+    assert shindo_from_gal(0.8) == "2"
+    assert shindo_from_gal(2.49) == "2"
+    assert shindo_from_gal(2.5) == "3"
+    assert shindo_from_gal(7.99) == "3"
+    assert shindo_from_gal(8.0) == "4"
+    assert shindo_from_gal(24.99) == "4"
+    assert shindo_from_gal(25.0) == "5-"
+    assert shindo_from_gal(80.0) == "5+"
+    assert shindo_from_gal(140.0) == "6-"
+    assert shindo_from_gal(250.0) == "6+"
+    assert shindo_from_gal(400.0) == "7"
+    assert shindo_from_gal(10000.0) == "7"
+
+
+def test_shindo_3_matches_the_design_target():
+    # The whole threshold argument in the design rests on shindo 3 being
+    # 2.5-8 gal. If this drifts, the 5x multiplier rationale is wrong too.
+    assert shindo_from_gal(2.5) == "3"
+    assert shindo_from_gal(7.9) == "3"
+
+
+def test_alarm_exposes_shindo():
+    a = Alarm(nodes=["node-a", "node-b"], peak_gal=12.0)
+    assert a.shindo == "4"

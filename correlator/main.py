@@ -10,10 +10,11 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
-from core import Correlator
+from core import Correlator, shindo_from_gal
 
 # Topic namespace. Every publisher and subscriber in this system shares it, so
 # two deployments -- or a test run and live hardware -- can use one broker
@@ -107,17 +108,33 @@ def main() -> None:
             return
 
         now = time.monotonic()
-        print(f"event  {node_id}  peak={peak:.2f} gal")
-        to_cloud({"event_node": node_id, "event_peak_gal": peak})
+        print(f"event  {node_id}  peak={peak:.2f} gal  ~shindo {shindo_from_gal(peak)}")
+        to_cloud({"event_node": node_id, "event_peak_gal": peak,
+                  "event_shindo": shindo_from_gal(peak)})
 
         alarm = corr.add_event(node_id, peak, now)
         if alarm:
+            # UTC, ISO 8601. Thingsboard stamps its own arrival time, but that
+            # is the time the bridge published, not the time the ground moved.
+            when = datetime.now(timezone.utc).isoformat(timespec="seconds")
             payload = json.dumps({"nodes": alarm.nodes,
-                                  "peak_gal": alarm.peak_gal})
+                                  "peak_gal": alarm.peak_gal,
+                                  "shindo": alarm.shindo,
+                                  "at": when})
             client.publish(ALARM_TOPIC, payload)
-            print(f"ALARM  {alarm.nodes}  peak={alarm.peak_gal:.2f} gal")
-            to_cloud({"alarm": 1, "alarm_peak_gal": alarm.peak_gal,
-                      "alarm_nodes": ",".join(alarm.nodes)})
+            print(f"ALARM  {alarm.nodes}  peak={alarm.peak_gal:.2f} gal  "
+                  f"~shindo {alarm.shindo}")
+            to_cloud({
+                "alarm": 1,
+                "alarm_peak_gal": round(alarm.peak_gal, 2),
+                "alarm_shindo": alarm.shindo,
+                "alarm_nodes": ", ".join(alarm.nodes),
+                "alarm_node_count": len(alarm.nodes),
+                "alarm_at": when,
+                # Spelled out rather than omitted: a blank magnitude column
+                # invites someone to fill it in with a guess.
+                "alarm_magnitude": "n/a - needs epicentre distance",
+            })
 
     # paho-mqtt 2.x requires the callback API version explicitly.
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)

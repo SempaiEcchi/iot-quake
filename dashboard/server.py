@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import paho.mqtt.client as mqtt
@@ -27,6 +28,12 @@ import paho.mqtt.client as mqtt
 # without correlating each other's events into false alarms.
 PREFIX = os.environ.get("QUAKE_PREFIX", "quake")
 
+# Reuse the correlator's band table rather than copying it. Two copies of a
+# lookup like this drift, and the drift is silent -- the dashboard would just
+# start disagreeing with the cloud about how strong an earthquake was.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "correlator"))
+from core import shindo_from_gal  # noqa: E402
+
 
 TRACE_LEN = 120          # dev_gal samples kept per channel (~2 min at 1 Hz)
 EVENT_LOG_LEN = 25
@@ -35,8 +42,9 @@ STALE_S = 5.0            # no telemetry for this long -> channel shown offline
 state_lock = threading.Lock()
 channels = {}            # node_id -> {dev_gal, uptime_s, last_seen, trace}
 event_log = deque(maxlen=EVENT_LOG_LEN)
+quake_log = deque(maxlen=EVENT_LOG_LEN)
 counters = {"events": 0, "alarms": 0, "in_alarms": 0}
-last_alarm = {"at": 0.0, "nodes": [], "peak_gal": 0.0}
+last_alarm = {"at": 0.0, "nodes": [], "peak_gal": 0.0, "shindo": "-"}
 subscribers = []         # queue per connected browser
 
 
@@ -71,6 +79,7 @@ def snapshot() -> str:
         return json.dumps({
             "channels": chans,
             "events": list(event_log),
+            "quakes": list(quake_log),
             "counters": {**counters, "rejected": max(0, rejected)},
             "alarm_active": (now - last_alarm["at"]) < 8.0,
             "last_alarm": last_alarm,
@@ -96,15 +105,22 @@ def on_message(client, userdata, msg):
         with state_lock:
             last_alarm["at"] = now
             last_alarm["nodes"] = data.get("nodes", [])
-            last_alarm["peak_gal"] = data.get("peak_gal", 0.0)
+            peak = float(data.get("peak_gal", 0.0))
+            shindo = data.get("shindo") or shindo_from_gal(peak)
+            last_alarm["peak_gal"] = peak
+            last_alarm["shindo"] = shindo
             counters["alarms"] += 1
             counters["in_alarms"] += len(data.get("nodes", []))
-            event_log.appendleft({
+            row = {
                 "kind": "alarm",
                 "node": ", ".join(data.get("nodes", [])),
-                "peak_gal": data.get("peak_gal", 0.0),
+                "peak_gal": peak,
+                "shindo": shindo,
                 "t": time.strftime("%H:%M:%S"),
-            })
+                "date": time.strftime("%Y-%m-%d"),
+            }
+            event_log.appendleft(row)
+            quake_log.appendleft(row)
         broadcast()
         return
 
@@ -123,10 +139,12 @@ def on_message(client, userdata, msg):
             c["trace"].append(round(c["dev_gal"], 3))
         elif kind == "event":
             counters["events"] += 1
+            peak = float(data.get("peak_gal", 0.0))
             event_log.appendleft({
                 "kind": "event",
                 "node": node_id,
-                "peak_gal": float(data.get("peak_gal", 0.0)),
+                "peak_gal": peak,
+                "shindo": shindo_from_gal(peak),
                 "t": time.strftime("%H:%M:%S"),
             })
     broadcast()
@@ -264,6 +282,10 @@ PAGE = r"""<!doctype html>
   tr:last-child td{border-bottom:0}
   td.k{font-family:ui-monospace,Menlo,monospace}
   .ev-alarm td.k{color:var(--alarm);font-weight:600}
+  td.shindo{font-weight:700;font-variant-numeric:tabular-nums}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;opacity:.7;
+     margin:0 0 10px}
+  .note{font-size:12px;opacity:.65;line-height:1.5;margin:12px 0 0}
   .empty{color:var(--muted);font-size:13px;padding:8px 0}
   footer{color:var(--muted);font-size:12px;margin-top:22px;line-height:1.7}
 </style></head><body><div class="wrap">
@@ -281,6 +303,20 @@ PAGE = r"""<!doctype html>
   <div class="sub" id="bsub">Waiting for two channels to agree</div>
 </div>
 
+<div class="card">
+  <h2>Earthquake log</h2>
+  <table><thead><tr>
+    <th>date</th><th>time</th><th>est. shindo</th>
+    <th style="text-align:right">peak (gal)</th><th>channels agreeing</th>
+  </tr></thead>
+  <tbody id="qlog"></tbody></table>
+  <div class="empty" id="qlogempty">No earthquakes recorded.</div>
+  <p class="note">Shindo is <strong>estimated</strong> from peak acceleration. JMA computes the
+  official value from a filtered three-component measure sustained for 0.3 s, which differs
+  from a bare peak. <strong>Magnitude is not shown</strong>: it describes energy at the source
+  and needs epicentre distance and depth, which one site cannot supply.</p>
+</div>
+
 <div class="stats">
   <div class="stat hero"><div class="n" id="s-rej">0</div>
     <div class="l">single-channel events rejected</div></div>
@@ -292,7 +328,8 @@ PAGE = r"""<!doctype html>
 <div id="chans"></div>
 
 <div class="card">
-  <table><thead><tr><th>time</th><th>channel</th><th style="text-align:right">peak (gal)</th></tr></thead>
+  <h2>All channel events</h2>
+  <table><thead><tr><th>time</th><th>channel</th><th>est. shindo</th><th style="text-align:right">peak (gal)</th></tr></thead>
   <tbody id="log"></tbody></table>
   <div class="empty" id="logempty">No events yet. Shake a node.</div>
 </div>
@@ -324,7 +361,8 @@ function render(s){
   if(fire){
     $('btitle').textContent = 'EARTHQUAKE ALARM';
     $('bsub').textContent =
-      `${s.last_alarm.nodes.join(' + ')} — peak ${s.last_alarm.peak_gal.toFixed(2)} gal`;
+      `est. shindo ${s.last_alarm.shindo} · peak ${s.last_alarm.peak_gal.toFixed(2)} gal · `
+      + s.last_alarm.nodes.join(' + ');
   } else {
     $('btitle').textContent = 'No alarm';
     $('bsub').textContent = s.counters.alarms
@@ -347,9 +385,18 @@ function render(s){
     </div>`).join('')
     : '<div class="card empty">No channels reporting. Start a node.</div>';
 
+  $('qlog').innerHTML = s.quakes.map(q => `
+    <tr class="ev-alarm">
+      <td>${q.date}</td><td>${q.t}</td>
+      <td class="shindo">${q.shindo}</td>
+      <td style="text-align:right">${q.peak_gal.toFixed(2)}</td>
+      <td>${q.node}</td></tr>`).join('');
+  $('qlogempty').style.display = s.quakes.length ? 'none' : '';
+
   $('log').innerHTML = s.events.map(e => `
     <tr class="${e.kind==='alarm'?'ev-alarm':''}">
       <td>${e.t}</td><td class="k">${e.kind==='alarm'?'ALARM · ':''}${e.node}</td>
+      <td class="shindo">${e.shindo}</td>
       <td style="text-align:right">${e.peak_gal.toFixed(2)}</td></tr>`).join('');
   $('logempty').style.display = s.events.length ? 'none' : '';
 }

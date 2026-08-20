@@ -151,6 +151,7 @@ static void poll_button() {
 static void on_message(char* topic, byte* payload, unsigned int len) {
   (void)payload; (void)len;
   if (strcmp(topic, "quake/alarm") == 0) {
+    Serial.println("ALARM received - buzzer on");
     digitalWrite(BUZZER_PIN, HIGH);
     digitalWrite(LED_PIN, HIGH);           // visible alarm as well as audible
     buzz_until_ms = millis() + BUZZ_MS;
@@ -173,7 +174,11 @@ static void net_pump() {
   if (!mqtt.connected()) {
     if (millis() - last_reconnect_ms > 2000) {
       last_reconnect_ms = millis();
-      if (mqtt.connect(base_id)) mqtt.subscribe("quake/alarm");
+      if (mqtt.connect(base_id)) {
+        bool sub = mqtt.subscribe("quake/alarm");
+        Serial.printf("MQTT connected, subscribe(quake/alarm)=%s\n",
+                      sub ? "ok" : "FAILED");
+      }
     }
     return;
   }
@@ -216,6 +221,12 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BOOT_BTN, INPUT_PULLUP);
   digitalWrite(LED_PIN, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // Short chirp at boot. Confirms the buzzer is wired and the polarity is
+  // right, so a silent alarm later is a subscription problem, not this.
+  digitalWrite(BUZZER_PIN, HIGH);
+  delay(120);
   digitalWrite(BUZZER_PIN, LOW);
 
   Wire.begin(SDA_PIN, SCL_PIN);

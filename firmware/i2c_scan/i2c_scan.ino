@@ -5,6 +5,12 @@
 void setup() {
   Serial.begin(115200);
   delay(500);
+
+  // Hold the buzzer quiet. GPIO25 floats after reset, and some 3-pin modules
+  // sound on a floating input, which makes running this scan unpleasant.
+  pinMode(25, OUTPUT);
+  digitalWrite(25, LOW);
+
   Wire.begin(21, 22);   // SDA, SCL
   Serial.println("scanning...");
 

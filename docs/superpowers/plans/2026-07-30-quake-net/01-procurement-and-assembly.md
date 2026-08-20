@@ -111,14 +111,14 @@ git commit -m "docs: node wiring"
 through Boards Manager and the same library through Library Manager; the plans give
 `arduino-cli` commands because they are exact and copy-pasteable.
 
-- [ ] **Step 1: Install arduino-cli**
+- [x] **Step 1: Install arduino-cli**
 
 ```bash
 brew install arduino-cli
 arduino-cli version
 ```
 
-- [ ] **Step 2: Install the ESP32 core**
+- [x] **Step 2: Install the ESP32 core**
 
 ```bash
 arduino-cli config init
@@ -128,13 +128,13 @@ arduino-cli core update-index
 arduino-cli core install esp32:esp32
 ```
 
-- [ ] **Step 3: Install PubSubClient**
+- [x] **Step 3: Install PubSubClient**
 
 ```bash
 arduino-cli lib install PubSubClient
 ```
 
-- [ ] **Step 4: Confirm the board is detected**
+- [x] **Step 4: Confirm the board is detected**
 
 ```bash
 arduino-cli board list
@@ -146,10 +146,24 @@ If no port appears, the board's USB-serial chip needs a driver. ESP32-DevKitC-32
 Silicon Labs CP2102 — install the CP210x VCP driver from Silicon Labs, then re-check. Some
 clone boards use a WCH CH340 instead and need the CH34x driver.
 
-- [ ] **Step 5: Write down the port**
+- [x] **Step 5: Write down the port**
 
 You need it throughout. macOS port names can change across reboots — re-check if uploads start
 failing.
+
+**Measured on this board (2026-08-20):**
+
+| | |
+|---|---|
+| Board | FREENOVE FNK0090, ESP32-WROOM-32, USB-C |
+| Port | `/dev/cu.usbserial-10` |
+| Chip | ESP32-D0WD-V3 rev 3.1 |
+| MAC | `28:05:a5:fc:12:80` -> node ID `node-fc1280` |
+| USB-serial | CP2102, no driver needed on macOS 15+ |
+
+**Upload speed:** the default 921600 baud fails on this board with
+`Unable to verify flash chip connection`. Every upload command in these plans therefore
+carries `--board-options UploadSpeed=115200`. Do not drop it.
 
 ---
 
@@ -161,7 +175,7 @@ failing.
 A throwaway sketch with one job: confirm the wiring before any real firmware exists. If this
 fails, no amount of correct algorithm will help.
 
-- [ ] **Step 1: Write the scanner**
+- [x] **Step 1: Write the scanner**
 
 ```cpp
 // firmware/i2c_scan/i2c_scan.ino
@@ -188,7 +202,7 @@ void setup() {
 void loop() {}
 ```
 
-- [ ] **Step 2: Compile it**
+- [x] **Step 2: Compile it**
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32 firmware/i2c_scan
@@ -201,8 +215,8 @@ Expected: `Sketch uses NNNNNN bytes`, no errors.
 Substitute your port from Task 3 Step 5.
 
 ```bash
-arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 firmware/i2c_scan
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+arduino-cli upload -p /dev/cu.usbserial-10 --fqbn esp32:esp32:esp32 --board-options UploadSpeed=115200 firmware/i2c_scan
+arduino-cli monitor -p /dev/cu.usbserial-10 -c baudrate=115200
 ```
 
 Expected:

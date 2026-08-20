@@ -101,7 +101,7 @@ near 9.8 means the code is in m/s² somewhere; near 1.0 means it is in g. Both a
 - [ ] **Step 3: Reflash the real firmware**
 
 ```bash
-arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 firmware/node
+arduino-cli upload -p /dev/cu.usbserial-10 --fqbn esp32:esp32:esp32 --board-options UploadSpeed=115200 firmware/node
 ```
 
 - [ ] **Step 4: Record the result in `docs/TESTLOG.md`**

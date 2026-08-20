@@ -215,8 +215,8 @@ typing, no leaning. Substitute your port.
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32 firmware/calibrate
-arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 firmware/calibrate
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200 > /tmp/node01.csv
+arduino-cli upload -p /dev/cu.usbserial-10 --fqbn esp32:esp32:esp32 --board-options UploadSpeed=115200 firmware/calibrate
+arduino-cli monitor -p /dev/cu.usbserial-10 -c baudrate=115200 > /tmp/node01.csv
 ```
 
 Wait 65 seconds, then Ctrl-C.
@@ -244,7 +244,7 @@ a quiet evening and a busy afternoon can differ by an order of magnitude if the 
 dominant source.
 
 ```bash
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200 > /tmp/node01b.csv
+arduino-cli monitor -p /dev/cu.usbserial-10 -c baudrate=115200 > /tmp/node01b.csv
 python tools/rms.py < /tmp/node01b.csv
 ```
 
@@ -287,13 +287,13 @@ Edit `firmware/node/config.h`:
 
 ```bash
 arduino-cli compile --fqbn esp32:esp32:esp32 firmware/node
-arduino-cli upload -p /dev/cu.usbserial-0001 --fqbn esp32:esp32:esp32 firmware/node
+arduino-cli upload -p /dev/cu.usbserial-10 --fqbn esp32:esp32:esp32 --board-options UploadSpeed=115200 firmware/node
 ```
 
 - [ ] **Step 3: Read the serial output and record the node ID**
 
 ```bash
-arduino-cli monitor -p /dev/cu.usbserial-0001 -c baudrate=115200
+arduino-cli monitor -p /dev/cu.usbserial-10 -c baudrate=115200
 ```
 
 Expected:

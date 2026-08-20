@@ -111,7 +111,9 @@ These apply to every plan. Exact values, copied from the design.
   `DLPF_CFG 6` → 5 Hz bandwidth** (the low-pass half of the 0.2–5 Hz band; without it the noise
   floor is ~7× worse). `node.ino` and `calibrate.ino` must set this identically.
 - **Unit conversion:** 1 g = 980.665 gal. All acceleration in the code is gal.
-- **Pins:** SDA `GPIO21`, SCL `GPIO22`, LED `GPIO26`, buzzer `GPIO25`
+- **Pins:** SDA `GPIO26`, SCL `GPIO27`, LED `GPIO2` (onboard), buzzer `GPIO25`. All on the
+  FNK0090's left header, which keeps every wire on one breadboard. `GPIO12` is unusable for
+  I2C: it is a strapping pin and the GY-521's pull-ups would select 1.8 V flash at boot.
 - **Detector constants:** `EMA_ALPHA` 0.01, `WARMUP_MS` 3000, `REFRACTORY_MS` 5000
 - **Correlator constants:** window 2.0 s, cooldown 10.0 s, `min_nodes` 2
 - **Node ID:** last three bytes of the WiFi MAC as lowercase hex, `node-a4c1f8`. The simulated

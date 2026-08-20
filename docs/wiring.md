@@ -11,15 +11,15 @@ Front view, USB-C at the bottom. **40 pins, not 38** — 20 per side, so it occu
 |---|---|---|---|---|
 | 1 | `3V3` | | 1 | `GND` |
 | 2 | `RST` | | 2 | `GPIO23` |
-| 3 | `GPIO36` | | 3 | **`GPIO22`** I2C_SCL |
+| 3 | `GPIO36` | | 3 | `GPIO22` (unused) |
 | 4 | `GPIO39` | | 4 | `GPIO1` U0TXD |
 | 5 | `GPIO34` | | 5 | `GPIO3` U0RXD |
-| 6 | `GPIO35` | | 6 | **`GPIO21`** I2C_SDA |
+| 6 | `GPIO35` | | 6 | `GPIO21` (unused) |
 | 7 | `GPIO32` | | 7 | `GND` |
 | 8 | `GPIO33` | | 8 | `GPIO19` |
 | 9 | **`GPIO25`** buzzer | | 9 | `GPIO18` |
-| 10 | `GPIO26` | | 10 | `GPIO5` |
-| 11 | `GPIO27` | | 11 | `GPIO17` |
+| 10 | **`GPIO26`** I2C SDA | | 10 | `GPIO5` |
+| 11 | **`GPIO27`** I2C SCL | | 11 | `GPIO17` |
 | 12 | `GPIO14` | | 12 | `GPIO16` |
 | 13 | `GPIO12` | | 13 | `GPIO4` |
 | 14 | **`GND`** | | 14 | `GPIO0` |
@@ -63,8 +63,8 @@ Buzzer in board 2 `J'`, numbers 22-24.
 |---|---|---|---|---|
 | 1 | `3V3` left 1 | `1I` b1 | GY-521 `VCC` | `22B` b1 |
 | 2 | `GND` left 14 | `14I` b1 | GY-521 `GND` | `23B` b1 |
-| 3 | `GPIO22` right 3 | `3G'` b2 | GY-521 `SCL` | `24B` b1 |
-| 4 | `GPIO21` right 6 | `6G'` b2 | GY-521 `SDA` | `25B` b1 |
+| 3 | `GPIO27` left 11 | `I11` b1 | GY-521 `SCL` | `B24` b1 |
+| 4 | `GPIO26` left 10 | `I10` b1 | GY-521 `SDA` | `B25` b1 |
 | 5 | `GPIO25` left 9 | `9I` b1 | buzzer `IO` | b2 `J'` |
 | 6 | `3V3` left 16 | `16I` b1 | buzzer `VCC` | b2 `J'` |
 | 7 | `GND` right 17 | `17G'` b2 | buzzer `GND` | b2 `J'` |
@@ -84,8 +84,8 @@ which the firmware uses instead of a discrete one.
 | 2 | ESP32 `GND` | blue (−) rail | Common ground |
 | 3 | red (+) rail | GY-521 `VCC` | 3.3 V, **not 5 V** |
 | 4 | blue (−) rail | GY-521 `GND` | |
-| 5 | ESP32 `GPIO21` | GY-521 `SDA` | I2C data |
-| 6 | ESP32 `GPIO22` | GY-521 `SCL` | I2C clock |
+| 5 | ESP32 `GPIO26` | GY-521 `SDA` | I2C data |
+| 6 | ESP32 `GPIO27` | GY-521 `SCL` | I2C clock |
 
 Buzzer (3-pin active module), three more:
 
@@ -216,3 +216,16 @@ done, 1 device(s)
 
 `0 device(s)` is wiring, not code — see the troubleshooting table in
 [plan 01](superpowers/plans/2026-07-30-quake-net/01-procurement-and-assembly.md).
+
+## Why not the default GPIO21/GPIO22
+
+Those are the ESP32's nominal I2C pins, but they sit on the **right** header, which on this
+two-board layout means running wires across to board 2. `Wire.begin(sda, scl)` accepts any
+GPIO, so the bus was moved to `GPIO26`/`GPIO27` (left 10 and 11) to keep every wire on
+board 1, directly below the buzzer at left 9.
+
+**`GPIO12` is not usable for I2C.** It is a strapping pin (MTDI) that selects flash voltage
+at boot: high means 1.8 V. The GY-521 has onboard I2C pull-ups, so wiring either bus line to
+`GPIO12` pulls it high at every boot and the board fails to start on its 3.3 V flash. It
+looks like a dead board, not a wiring mistake. `GPIO14` is safe; `GPIO32`/`GPIO33` and
+`GPIO26`/`GPIO27` are safer still.

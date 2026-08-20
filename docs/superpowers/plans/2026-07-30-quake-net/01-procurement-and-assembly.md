@@ -15,8 +15,8 @@
 See [00-index.md](00-index.md#global-constraints). Relevant here:
 
 - Board ESP32-DevKitC-32E, FQBN `esp32:esp32:esp32`
-- MPU6050 at I2C `0x68`, SDA `GPIO21`, SCL `GPIO22`
-- LED `GPIO26`, buzzer `GPIO25`
+- MPU6050 at I2C `0x68`, SDA `GPIO26`, SCL `GPIO27`
+- LED `GPIO2` (onboard, no wiring), buzzer `GPIO25`
 
 ---
 
@@ -31,8 +31,6 @@ See [00-index.md](00-index.md#global-constraints). Relevant here:
 | Breadboard | 1 | ~¥300 | Silicon House / Akizuki |
 | Jumper wires, male-male | 1 set | ~¥400 | Silicon House / Akizuki |
 | Active buzzer module, 3-pin | 1 | ~¥100 | Silicon House / Akizuki |
-| 5 mm LED | pack | ~¥100 | Silicon House / Akizuki |
-| 330 Ω resistor | pack | ~¥100 | Silicon House / Akizuki |
 | micro-USB cable | 1 | ~¥300 | skip if you own one |
 
 Osaka, in person — 日本橋 / でんでんタウン:
@@ -69,10 +67,10 @@ week's delay into a two-minute swap. It also leaves the door open to the two-sen
 MPU6050 (GY-521)     ESP32-DevKitC-32E
   VCC   ───────────── 3V3        <-- 3.3 V, NOT 5V
   GND   ───────────── GND
-  SCL   ───────────── GPIO22
-  SDA   ───────────── GPIO21
+  SCL   ───────────── GPIO27
+  SDA   ───────────── GPIO26
 
-LED anode  ────────── GPIO26  ── 330 Ω ── LED ── GND
+LED       ────────── none. The FNK0090 has an onboard LED on GPIO2.
 Buzzer signal ─────── GPIO25   (VCC to 3V3, GND to GND)
 ```
 
@@ -82,10 +80,11 @@ USB unplugged while wiring. The GY-521 has an onboard regulator and tolerates 5 
 its I2C lines are 3.3 V — powering from 3V3 keeps everything at one level and removes any
 question of level shifting.
 
-- [ ] **Step 2: Check the LED orientation**
+- [x] **Step 2: No discrete LED**
 
-Long leg (anode) toward GPIO26 through the resistor; short leg (cathode) to GND. Backwards
-means it silently never lights, which is confusing to debug later.
+The FNK0090 has an onboard LED on `GPIO2` (silkscreened `LED_IO2`), so the firmware uses that
+and there is no LED or resistor to wire. Saves two holes and removes the classic
+LED-in-backwards bug.
 
 - [ ] **Step 3: Photograph the node**
 
@@ -185,7 +184,7 @@ fails, no amount of correct algorithm will help.
 void setup() {
   Serial.begin(115200);
   delay(500);
-  Wire.begin(21, 22);   // SDA, SCL
+  Wire.begin(26, 27);   // SDA, SCL
   Serial.println("scanning...");
 
   int found = 0;

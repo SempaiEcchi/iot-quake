@@ -7,9 +7,9 @@
 #include "config.h"
 #include "detector.h"
 
-#define SDA_PIN      21
-#define SCL_PIN      22
-#define LED_PIN      26
+#define SDA_PIN      26
+#define SCL_PIN      27
+#define LED_PIN      2      // onboard LED on the FNK0090 (LED_IO2), no discrete LED needed
 #define BUZZER_PIN   25
 
 #define MPU_ADDR       0x68   // 0x69 if your scan found AD0 pulled high

@@ -53,10 +53,10 @@ In Osaka: シリコンハウス共立, 浪速区日本橋5-8-26. 秋月電子 is
 MPU6050        ESP32
   VCC   ──────  3V3        <-- 3.3 V, NOT 5V
   GND   ──────  GND
-  SCL   ──────  GPIO22
-  SDA   ──────  GPIO21
+  SCL   ──────  GPIO27
+  SDA   ──────  GPIO26
 
-LED    ──────  GPIO26  (through 330 Ω to GND)
+LED    ──────  GPIO2   (onboard on the FNK0090, no wiring)
 Buzzer ──────  GPIO25
 ```
 

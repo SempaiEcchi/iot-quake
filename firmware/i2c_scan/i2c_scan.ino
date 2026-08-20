@@ -11,7 +11,7 @@ void setup() {
   pinMode(25, OUTPUT);
   digitalWrite(25, LOW);
 
-  Wire.begin(21, 22);   // SDA, SCL
+  Wire.begin(26, 27);   // SDA, SCL
   Serial.println("scanning...");
 
   int found = 0;

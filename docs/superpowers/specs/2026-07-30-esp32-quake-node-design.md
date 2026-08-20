@@ -104,8 +104,8 @@ measured during calibration, not assumed.
 MPU6050 (GY-521)     ESP32-DevKitC-32E
   VCC   ───────────── 3V3        <-- 3.3 V, NOT 5V
   GND   ───────────── GND
-  SCL   ───────────── GPIO22
-  SDA   ───────────── GPIO21
+  SCL   ───────────── GPIO27
+  SDA   ───────────── GPIO26
 
 LED    ───────────── GPIO26  (through 330 Ω to GND)
 Buzzer ───────────── GPIO25

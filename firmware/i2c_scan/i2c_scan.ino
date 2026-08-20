@@ -9,7 +9,7 @@ void setup() {
   // Hold the buzzer quiet. GPIO25 floats after reset, and some 3-pin modules
   // sound on a floating input, which makes running this scan unpleasant.
   pinMode(25, OUTPUT);
-  digitalWrite(25, LOW);
+  digitalWrite(25, HIGH);            // buzzer is active-LOW: HIGH is silent
 
   Wire.begin(26, 27);   // SDA, SCL
   Serial.println("scanning...");

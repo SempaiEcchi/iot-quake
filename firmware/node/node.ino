@@ -21,6 +21,13 @@
 #define SCL_PIN      27
 #define LED_PIN      2      // onboard LED on the FNK0090 (LED_IO2)
 #define BUZZER_PIN   25
+// This module is active-LOW: it sounds while the pin is LOW and is silent
+// while HIGH. Measured, not assumed -- driving it the obvious way left it
+// screaming continuously and going quiet for 1.5 s on each alarm, which is
+// exactly backwards. Use these two names rather than HIGH/LOW anywhere the
+// buzzer is touched, including the diagnostic sketches.
+#define BUZZ_ON      LOW
+#define BUZZ_OFF     HIGH
 
 #define REG_PWR_MGMT   0x6B
 #define REG_CONFIG     0x1A
@@ -152,7 +159,7 @@ static void on_message(char* topic, byte* payload, unsigned int len) {
   (void)payload; (void)len;
   if (strcmp(topic, "quake/alarm") == 0) {
     Serial.println("ALARM received - buzzer on");
-    digitalWrite(BUZZER_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, BUZZ_ON);
     digitalWrite(LED_PIN, HIGH);           // visible alarm as well as audible
     buzz_until_ms = millis() + BUZZ_MS;
   }
@@ -221,13 +228,13 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(BOOT_BTN, INPUT_PULLUP);
   digitalWrite(LED_PIN, LOW);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(BUZZER_PIN, BUZZ_OFF);
 
   // Short chirp at boot. Confirms the buzzer is wired and the polarity is
   // right, so a silent alarm later is a subscription problem, not this.
-  digitalWrite(BUZZER_PIN, HIGH);
+  digitalWrite(BUZZER_PIN, BUZZ_ON);
   delay(120);
-  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(BUZZER_PIN, BUZZ_OFF);
 
   Wire.begin(SDA_PIN, SCL_PIN);
   // 100 kHz, not 400 kHz. Two sensors at 100 Hz is 1.2 kB/s, so bandwidth is
@@ -265,7 +272,7 @@ void loop() {
   net_pump();
 
   if (buzz_until_ms && millis() > buzz_until_ms) {
-    digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(BUZZER_PIN, BUZZ_OFF);
     digitalWrite(LED_PIN, LOW);
     buzz_until_ms = 0;
   }

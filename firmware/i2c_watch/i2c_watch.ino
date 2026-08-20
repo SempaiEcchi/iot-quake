@@ -9,7 +9,7 @@ int hits = 0, polls = 0;
 void setup() {
   Serial.begin(115200);
   delay(400);
-  pinMode(25, OUTPUT); digitalWrite(25, LOW);
+  pinMode(25, OUTPUT); digitalWrite(25, HIGH);   // buzzer is active-LOW: HIGH is silent
   Wire.begin(26, 27);
   Wire.setClock(100000);
   Serial.println("\npress the sensor pins - watching for 0x68");

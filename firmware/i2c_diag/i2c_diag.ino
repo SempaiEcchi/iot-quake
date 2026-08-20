@@ -28,7 +28,7 @@ void report(const char* name, int pin) {
 void setup() {
   Serial.begin(115200);
   delay(500);
-  pinMode(25, OUTPUT); digitalWrite(25, LOW);
+  pinMode(25, OUTPUT); digitalWrite(25, HIGH);   // buzzer is active-LOW: HIGH is silent
 
   Serial.println("\npull-up strength test");
   report("SDA", 26);

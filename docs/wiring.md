@@ -268,3 +268,23 @@ Run sensor 2 on a metre or two of wire to a different table or the far side of
 the room and the correlation becomes real. The bus clock is set to 100 kHz
 (`Wire.setClock`) specifically to survive that cable; 400 kHz will not. Two
 sensors at 100 Hz is about 1.2 kB/s, so the slower clock costs nothing.
+
+## Buzzer polarity: this module is ACTIVE-LOW
+
+Measured with `firmware/buzzer_test`, which holds the pin at each level for six
+seconds and mirrors the state on the onboard LED so no serial monitor is needed.
+The buzzer was silent with the LED on (pin HIGH) and sounding with it off
+(pin LOW).
+
+So the resting state of a freshly reset GPIO sounds it. Driven the obvious way
+the buzzer screamed continuously and went *quiet* for 1.5 s on each alarm --
+exactly inverted, and easy to misread as "the alarm does not work".
+
+`node.ino` defines `BUZZ_ON` = `LOW` and `BUZZ_OFF` = `HIGH`; use those names
+rather than HIGH/LOW anywhere the buzzer is touched. The diagnostic sketches
+(`i2c_scan`, `i2c_diag`, `i2c_watch`, `line_probe`) park the pin HIGH for the
+same reason -- they used to park it LOW, which silently made every diagnostic
+run a noise complaint.
+
+A module of the opposite polarity is equally common. Re-run `buzzer_test` after
+any swap; do not assume.

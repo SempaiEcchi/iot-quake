@@ -15,7 +15,7 @@ int rise(int pin) {
 void setup() {
   Serial.begin(115200);
   delay(400);
-  pinMode(25, OUTPUT); digitalWrite(25, LOW);
+  pinMode(25, OUTPUT); digitalWrite(25, HIGH);   // buzzer is active-LOW: HIGH is silent
   Serial.println("\nmove a bus wire onto the GY-521 VCC pin and watch its line");
 }
 

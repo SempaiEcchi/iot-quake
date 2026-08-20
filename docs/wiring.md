@@ -244,7 +244,12 @@ sensor 1's existing nodes, reachable at `C22`-`C29` on board 1:
 | 2 | `C23` GND node | `GND` |
 | 3 | `C24` SCL node | `SCL` |
 | 4 | `C25` SDA node | `SDA` |
-| 5 | `D22` VCC node again | **`AD0`** -> makes it `0x69` |
+| 5 | sensor 2's own `VCC` node | **`AD0`** -> makes it `0x69` |
+
+Wire 5 stays local to sensor 2 -- a short jumper between its `VCC` and `AD0`
+columns, no need to run back to sensor 1. Safe only because `VCC` here is 3.3 V.
+Power a GY-521 from `5V` and this would put 5 V on a 3.3 V logic input; tie
+`AD0` to the module's regulated `3V3`/`VIO` output in that case instead.
 
 The firmware probes both addresses at boot and every 5 s after, so it does not
 matter which sensor appears first or whether one is missing. Each address is an

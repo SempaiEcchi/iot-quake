@@ -2,6 +2,77 @@
 
 Node: FREENOVE FNK0090 (ESP32-WROOM-32) + GY-521 (MPU6050), on one breadboard.
 
+## FNK0090 pinout (verified from the board)
+
+Front view, USB-C at the bottom. **40 pins, not 38** — 20 per side, so it occupies
+20 breadboard columns.
+
+| # | LEFT header | | # | RIGHT header |
+|---|---|---|---|---|
+| 1 | `3V3` | | 1 | `GND` |
+| 2 | `RST` | | 2 | `GPIO23` |
+| 3 | `GPIO36` | | 3 | **`GPIO22`** I2C_SCL |
+| 4 | `GPIO39` | | 4 | `GPIO1` U0TXD |
+| 5 | `GPIO34` | | 5 | `GPIO3` U0RXD |
+| 6 | `GPIO35` | | 6 | **`GPIO21`** I2C_SDA |
+| 7 | `GPIO32` | | 7 | `GND` |
+| 8 | `GPIO33` | | 8 | `GPIO19` |
+| 9 | **`GPIO25`** buzzer | | 9 | `GPIO18` |
+| 10 | `GPIO26` | | 10 | `GPIO5` |
+| 11 | `GPIO27` | | 11 | `GPIO17` |
+| 12 | `GPIO14` | | 12 | `GPIO16` |
+| 13 | `GPIO12` | | 13 | `GPIO4` |
+| 14 | **`GND`** | | 14 | `GPIO0` |
+| 15 | `GPIO13` | | 15 | **`GPIO2`** LED_IO2, onboard LED |
+| 16 | `3V3` | | 16 | `GPIO15` |
+| 17 | `3V3` | | 17 | `GND` |
+| 18 | `3V3` | | 18 | `GND` |
+| 19 | `5V` | | 19 | `GND` |
+| 20 | `5V` | | 20 | `GND` |
+
+Three spare `3V3` pins on the left and four spare `GND` on the right mean this build
+needs **no power rails** — every load gets its own pin.
+
+## Breadboard placement (two half-size boards, side by side)
+
+Two 400-point boards joined along the long edge, facing rails removed. Letters read
+`A`-`J` on board 1 then `A'`-`J'` on board 2; numbers 1-30 run down both.
+
+- ESP32 left header in board 1 **`J`**, numbers 1-20
+- ESP32 right header in board 2 **`F'`**, numbers 1-20
+
+Free holes after seating:
+
+| Area | Use |
+|---|---|
+| board 1 `F` `G` `H` `I` | reach any left-side ESP32 pin |
+| board 2 `G'` `H'` `I'` `J'` | reach any right-side ESP32 pin |
+| board 1 `A`-`E`, numbers 21-30 | GY-521 sits here |
+| board 2 `G'`-`J'`, numbers 21-30 | buzzer sits here |
+| board 2 `A'`-`E'` | under the ESP32 body, unusable |
+
+Wire into the **same number, a different letter on the same side of the channel**.
+`9J` is reached from `9I`; `9H` and `10J` reach nothing.
+
+### Wire list
+
+GY-521 pins in board 1 `A`, numbers 22-29 (`VCC GND SCL SDA XDA XCL AD0 INT`).
+Buzzer in board 2 `J'`, numbers 22-24.
+
+| # | From (ESP32 pin) | Hole | To | Hole |
+|---|---|---|---|---|
+| 1 | `3V3` left 1 | `1I` b1 | GY-521 `VCC` | `22B` b1 |
+| 2 | `GND` left 14 | `14I` b1 | GY-521 `GND` | `23B` b1 |
+| 3 | `GPIO22` right 3 | `3G'` b2 | GY-521 `SCL` | `24B` b1 |
+| 4 | `GPIO21` right 6 | `6G'` b2 | GY-521 `SDA` | `25B` b1 |
+| 5 | `GPIO25` left 9 | `9I` b1 | buzzer `IO` | b2 `J'` |
+| 6 | `3V3` left 16 | `16I` b1 | buzzer `VCC` | b2 `J'` |
+| 7 | `GND` right 17 | `17G'` b2 | buzzer `GND` | b2 `J'` |
+
+Two dovetailed boards flex at the seam. For the long unattended run tape **both**
+boards down - a rocking seam is movement in the 0.2-5 Hz band, exactly what the
+detector looks for.
+
 ## Connections
 
 Six jumpers. No LED and no resistor — the FNK0090 has an onboard LED on **GPIO2**,

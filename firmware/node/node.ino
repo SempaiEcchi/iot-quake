@@ -93,6 +93,8 @@ char     base_id[16];
 uint32_t next_sample_us = 0, next_tel_ms = 0, buzz_until_ms = 0;
 uint32_t last_reconnect_ms = 0, next_retry_ms = 0;
 uint32_t shake_until_ms = 0, btn_ok_ms = 0, next_auto_shake_ms = 0;
+uint32_t samples_this_sec = 0;
+uint32_t reconnect_backoff_ms = 2000;
 
 // ---------- sensor ----------
 
@@ -179,12 +181,23 @@ static void net_pump() {
     return;
   }
   if (!mqtt.connected()) {
-    if (millis() - last_reconnect_ms > 2000) {
+    // Back off, do not hammer. Each failed connect() blocks for seconds while
+    // the TCP handshake times out, and retrying every 2 s spends most of the
+    // loop inside it -- measured at 1 Hz sampling against an unreachable
+    // broker, against a nominal 100. Detection is supposed to survive a
+    // network outage; at 1 Hz it does not. Backing off to 30 s keeps sampling
+    // above 90% while an outage lasts.
+    if (millis() - last_reconnect_ms > reconnect_backoff_ms) {
       last_reconnect_ms = millis();
       if (mqtt.connect(base_id)) {
+        reconnect_backoff_ms = 2000;
         bool sub = mqtt.subscribe("quake/alarm");
         Serial.printf("MQTT connected, subscribe(quake/alarm)=%s\n",
                       sub ? "ok" : "FAILED");
+      } else {
+        reconnect_backoff_ms = min(reconnect_backoff_ms * 2, (uint32_t)30000);
+        Serial.printf("MQTT connect failed, retry in %lu ms\n",
+                      (unsigned long)reconnect_backoff_ms);
       }
     }
     return;
@@ -195,6 +208,16 @@ static void net_pump() {
 static void publish_tel() {
   if (millis() < next_tel_ms) return;
   next_tel_ms = millis() + TEL_MS;
+  // Actual sample rate, not the nominal 100. A real I2C read costs about a
+  // millisecond per sensor, and if the loop ever falls behind the gate resyncs
+  // by dropping samples -- silently. Event durations would shrink and the EMA
+  // time constant would stretch, both of which corrupt detection while
+  // everything still looks like it is working. Watch this number.
+  Serial.printf("health: %lu Hz  a=%s %.2f gal  b=%s %.2f gal\n",
+                (unsigned long)samples_this_sec,
+                chan[0].present ? "real" : "sim", chan[0].last_dev,
+                chan[1].present ? "real" : "sim", chan[1].last_dev);
+  samples_this_sec = 0;
   for (int i = 0; i < NCHAN; i++) {
     char buf[96];
     snprintf(buf, sizeof(buf), "{\"node\":\"%s\",\"dev_gal\":%.2f,\"uptime_s\":%lu}",
@@ -298,6 +321,7 @@ void loop() {
     next_sample_us += SAMPLE_US;
 
   uint32_t now = millis();
+  samples_this_sec++;
   for (int i = 0; i < NCHAN; i++) {
     Channel* c = &chan[i];
     float mag;

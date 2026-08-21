@@ -17,6 +17,7 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <ESPmDNS.h>
 #include "config.h"
 #include "detector.h"
 
@@ -279,6 +280,10 @@ void setup() {
   digitalWrite(BUZZER_PIN, BUZZ_OFF);
 
   Wire.begin(SDA_PIN, SCL_PIN);
+  // The MPU6050 needs ~100 ms after power-up before it answers. Probing
+  // immediately made every boot report NO SENSOR and recover only on the 5 s
+  // retry -- harmless but indistinguishable from a genuine wiring fault.
+  delay(150);
   // 100 kHz, not 400 kHz. Two sensors at 100 Hz is 1.2 kB/s, so bandwidth is
   // irrelevant, and the slower edge rate is what lets the second sensor sit on
   // a metre or two of cable at the far end of the room. Raise it only if both
@@ -314,7 +319,19 @@ void setup() {
   }
   Serial.printf("threshold=%.1f gal\n", THRESHOLD_GAL);
 
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  // Resolve the broker by name, fall back to the literal IP. A DHCP lease that
+  // moves is otherwise a silent failure: the node keeps running, keeps
+  // sampling, and never reaches the broker.
+  IPAddress broker;
+  if (MDNS.begin(base_id) && (broker = MDNS.queryHost(MQTT_HOSTNAME, 5000)) != IPAddress()) {
+    Serial.printf("broker %s resolved to %s\n", MQTT_HOSTNAME,
+                  broker.toString().c_str());
+    mqtt.setServer(broker, MQTT_PORT);
+  } else {
+    Serial.printf("mDNS could not resolve %s, falling back to %s\n",
+                  MQTT_HOSTNAME, MQTT_HOST);
+    mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  }
   mqtt.setCallback(on_message);
   mqtt.setSocketTimeout(2);   // default is 15 s, which stalls loop() hard
 

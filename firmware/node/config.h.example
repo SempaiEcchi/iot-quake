@@ -5,7 +5,11 @@
 #define WIFI_SSID      "your-hotspot-name"
 #define WIFI_PASSWORD  "your-hotspot-password"
 
-// Laptop's IP on the hotspot. Find it with: ipconfig getifaddr en0
+// Broker location. MQTT_HOSTNAME is resolved by mDNS first; MQTT_HOST is the
+// fallback if that fails. Resolving by name survives a DHCP lease change,
+// which is otherwise a silent failure -- the node keeps sampling and never
+// reaches the broker. macOS name: `scutil --get LocalHostName`.
+#define MQTT_HOSTNAME  "your-laptop-name"
 #define MQTT_HOST      "192.168.1.100"
 #define MQTT_PORT      1883
 

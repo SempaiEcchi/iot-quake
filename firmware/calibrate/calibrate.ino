@@ -17,7 +17,7 @@ uint32_t next_us = 0;
 void setup() {
   Serial.begin(115200);
   Wire.begin(26, 27);   // SDA, SCL
-  Wire.setClock(400000);
+  Wire.setClock(100000);   // must match node.ino, or this characterises a different setup
   Wire.beginTransmission(MPU_ADDR); Wire.write(0x6B); Wire.write(0x00);
   Wire.endTransmission();
   // CONFIG: DLPF_CFG=6 -> 5 Hz accel bandwidth. MUST match node.ino, or the

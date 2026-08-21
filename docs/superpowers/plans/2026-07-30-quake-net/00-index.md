@@ -104,9 +104,10 @@ These apply to every plan. Exact values, copied from the design.
 
 - **Board:** ESP32-DevKitC-32E, FQBN `esp32:esp32:esp32`
 - **Sampling:** 100 Hz (10 000 µs period), gated on `micros()`, **resyncing** rather than
-  catching up when more than 10 periods behind
+  catching up when more than 10 periods behind. Confirmed 100 Hz flat by the node's health line.
 - **Socket timeout:** `mqtt.setSocketTimeout(2)` — PubSubClient's default is 15 s
-- **Threshold:** 5× measured RMS for shindo 3, 10× for shindo 4. Measured, never guessed.
+- **Threshold:** measured 2026-08-21 at **7.33 gal** (10x an RMS of 0.733 gal). The floor
+  came in below the 0.9 gal assumed, so 10x still reaches shindo 3 rather than only shindo 4.
 - **Sensor:** MPU6050 at I2C address `0x68`, ±2 g full scale, 16384 LSB/g, **CONFIG `0x1A` =
   `DLPF_CFG 6` → 5 Hz bandwidth** (the low-pass half of the 0.2–5 Hz band; without it the noise
   floor is ~7× worse). `node.ino` and `calibrate.ino` must set this identically.
@@ -134,10 +135,10 @@ These apply to every plan. Exact values, copied from the design.
 
 ## Progress
 
-- [ ] 01 Procurement & assembly — **blocked on parts**
+- [x] 01 Procurement & assembly — FNK0090 + soldered GY-521 at 0x68, buzzer on GPIO25
 - [x] 02 Node firmware — written, unit-tested, compiles clean (not yet flashed)
 - [x] 03 Correlator, simulated node & dashboard — written and tested end to end
-- [ ] 04 Bringup & calibration — **needs hardware**
+- [x] 04 Bringup & calibration — RMS 0.733 gal, threshold 7.33 gal (10x). See docs/RESULTS.md
 - [ ] 05 Integration testing — **needs hardware**
 - [ ] 06 Public release — after 05
 

@@ -62,9 +62,17 @@
 // answers, so this fades out on its own as hardware arrives.
 #define BOOT_BTN       0      // FNK0090 BOOT button, active low
 #define SIM_NOISE_GAL  0.30f
-#define SIM_SHAKE_GAL  80.0f
+// 12 gal is shindo 4 -- a plausible reading for a second station that felt the
+// same quake. It used to be 80 gal, which was fine when both channels were
+// synthetic but is not now: the alarm reports the maximum across channels, so
+// an 80 gal simulated peak would drown out whatever the real sensor measured
+// and every alarm would claim shindo 5+ regardless of the ground truth.
+#define SIM_SHAKE_GAL  12.0f
 #define SIM_SHAKE_MS   800
-#define SIM_AUTO_MS    12000
+// 0 disables the timer. A simulated channel firing on its own schedule filled
+// the earthquake log with fabricated entries, which was harmless while nothing
+// was real and is not harmless now. The BOOT button is the only trigger.
+#define SIM_AUTO_MS    0
 
 #define NCHAN 2
 
@@ -280,7 +288,8 @@ void setup() {
     chan[i].present = mpu_init(chan[i].addr);
     detector_init(&chan[i].det, THRESHOLD_GAL);
     Serial.printf("%s at 0x%02X: %s\n", chan[i].id, chan[i].addr,
-                  chan[i].present ? "MPU6050 ok" : "no sensor - SIMULATED");
+                  chan[i].present ? "MPU6050 ok"
+                                  : "no sensor - SIMULATED, press BOOT to trigger");
   }
   Serial.printf("threshold=%.1f gal\n", THRESHOLD_GAL);
 
@@ -301,7 +310,7 @@ void loop() {
   }
 
   poll_button();
-  if (millis() > next_auto_shake_ms) {
+  if (SIM_AUTO_MS && millis() > next_auto_shake_ms) {
     next_auto_shake_ms = millis() + SIM_AUTO_MS;
     shake_until_ms = millis() + SIM_SHAKE_MS;
   }

@@ -67,7 +67,10 @@ def snapshot() -> str:
                 "dev_gal": c["dev_gal"],
                 "uptime_s": c["uptime_s"],
                 "online": (now - c["last_seen"]) < STALE_S,
-                "simulated": nid.startswith(("sim-", "mock-")),
+                # "mirror-" is a replay of another channel's samples, not a
+                # second sensor. Flagging it alongside the synthetic channels
+                # is the point: an unflagged mirror reads as corroboration.
+                "simulated": nid.startswith(("sim-", "mock-", "mirror-")),
                 "trace": list(c["trace"]),
             }
             for nid, c in sorted(channels.items())
@@ -338,7 +341,10 @@ PAGE = r"""<!doctype html>
   <strong>Rejected</strong> counts events that never became part of an alarm — each would have
   been a false alarm on a single-channel design. That is the measured value of the correlation
   rule.<br>
-  Channels tagged <em>simulated</em> are software, not hardware.
+  Channels tagged <em>simulated</em> are software, not hardware. A
+  <em>mirror-</em> channel replays another channel's samples, so its agreement is
+  automatic and proves nothing — an alarm involving one is a demonstration of the
+  alarm path, not evidence of ground motion.
 </footer>
 </div>
 

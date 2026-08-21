@@ -1,16 +1,19 @@
 // firmware/node/node.ino
 // Networked shake node. Samples at 100 Hz, publishes events over MQTT.
 //
-// Drives up to two MPU6050s on one I2C bus, addressed 0x68 and 0x69 (AD0 low
-// and high). Each sensor is an independent channel with its own detector and
-// its own node ID, so the correlator sees two agreeing sources exactly as it
-// would with two separate boards. No Python mock is needed.
+// One MPU6050 at 0x68, plus a MIRROR channel that replays the same readings
+// under a second node ID so the correlator has two sources to agree on.
 //
-// Co-located sensors are a weaker claim than separated ones: two modules on
-// the same breadboard feel the same table bump, so agreement between them
-// rejects single-sensor electrical glitches but not shared mechanical noise.
-// Run the second sensor on a metre or two of wire to a different surface and
-// the correlation becomes meaningful. See docs/wiring.md.
+// The mirror is not a measurement. It is the same sensor, the same sample, the
+// same instant -- so it agrees with the real channel by construction and the
+// correlation rule can never reject anything. Every alarm it produces is
+// vacuous. Its node ID is prefixed "mirror-" precisely so no log, dashboard or
+// report can present it as a second station.
+//
+// This exists to demonstrate the alarm path end to end with one sensor. The
+// design's actual claim -- that agreement between spatially separated sensors
+// distinguishes ground motion from someone leaning on the desk -- is NOT
+// demonstrated by it, and needs a real second sensor at 0x69 (AD0 high).
 #include <Wire.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -60,6 +63,12 @@
 // genuinely do. That means an all-simulated node self-correlates: it is a
 // demo mode, not evidence. A channel stops simulating the moment its sensor
 // answers, so this fades out on its own as hardware arrives.
+// Simulation is OFF. With a real sensor on 0x68 the only thing synthetic data
+// can do now is contaminate real measurements, and it did: fabricated events
+// were interleaved with genuine ones in the earthquake log. A missing sensor
+// publishes nothing and says so, which is a visible failure rather than a
+// plausible lie. Set to 1 only to demo with no hardware attached.
+#define SIM_ENABLED    0
 #define BOOT_BTN       0      // FNK0090 BOOT button, active low
 #define SIM_NOISE_GAL  0.30f
 // 12 gal is shindo 4 -- a plausible reading for a second station that felt the
@@ -92,9 +101,11 @@ struct Channel {
 WiFiClient   net;
 PubSubClient mqtt(net);
 
+#define MIRROR_ADDR 0x00      // not an I2C address: marks the mirror channel
+
 Channel chan[NCHAN] = {
-  {0x68, 'a', false, {}, "", "", "", 0.0f, 0x5eed1234, 0},
-  {0x69, 'b', false, {}, "", "", "", 0.0f, 0x1234beef, 0},
+  {0x68,        0, false, {}, "", "", "", 0.0f, 0x5eed1234, 0},
+  {MIRROR_ADDR, 0, false, {}, "", "", "", 0.0f, 0x1234beef, 0},
 };
 
 char     base_id[16];
@@ -282,14 +293,24 @@ void setup() {
   snprintf(base_id, sizeof(base_id), "node-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   for (int i = 0; i < NCHAN; i++) {
-    snprintf(chan[i].id, sizeof(chan[i].id), "%s%c", base_id, chan[i].suffix);
+    if (chan[i].addr == MIRROR_ADDR)
+      snprintf(chan[i].id, sizeof(chan[i].id), "mirror-%s", base_id + 5);
+    else
+      snprintf(chan[i].id, sizeof(chan[i].id), "%s", base_id);
     snprintf(chan[i].topic_event, sizeof(chan[i].topic_event), "quake/%s/event", chan[i].id);
     snprintf(chan[i].topic_tel,   sizeof(chan[i].topic_tel),   "quake/%s/tel",   chan[i].id);
+    if (chan[i].addr == MIRROR_ADDR) {
+      detector_init(&chan[i].det, THRESHOLD_GAL);
+      Serial.printf("%s: MIRROR of %s - not an independent measurement\n",
+                    chan[i].id, base_id);
+      continue;
+    }
     chan[i].present = mpu_init(chan[i].addr);
     detector_init(&chan[i].det, THRESHOLD_GAL);
     Serial.printf("%s at 0x%02X: %s\n", chan[i].id, chan[i].addr,
                   chan[i].present ? "MPU6050 ok"
-                                  : "no sensor - SIMULATED, press BOOT to trigger");
+                    : (SIM_ENABLED ? "no sensor - SIMULATED, press BOOT to trigger"
+                                   : "NO SENSOR - not publishing, check wiring"));
   }
   Serial.printf("threshold=%.1f gal\n", THRESHOLD_GAL);
 
@@ -309,8 +330,8 @@ void loop() {
     buzz_until_ms = 0;
   }
 
-  poll_button();
-  if (SIM_AUTO_MS && millis() > next_auto_shake_ms) {
+  if (SIM_ENABLED) poll_button();
+  if (SIM_ENABLED && SIM_AUTO_MS && millis() > next_auto_shake_ms) {
     next_auto_shake_ms = millis() + SIM_AUTO_MS;
     shake_until_ms = millis() + SIM_SHAKE_MS;
   }
@@ -331,17 +352,36 @@ void loop() {
 
   uint32_t now = millis();
   samples_this_sec++;
+  float real_mag = 0.0f;
+  bool  real_ok = false;
+
   for (int i = 0; i < NCHAN; i++) {
     Channel* c = &chan[i];
     float mag;
-    bool ok = c->present ? mpu_read_mag(c->addr, &mag) : sim_read_mag(c, &mag);
-    if (!ok) {                          // sensor dropped off the bus mid-run
-      // Say so. A silent fallback to simulation is the worst outcome here:
-      // the channel keeps publishing plausible events that are not
-      // measurements, and nothing downstream can tell the difference.
-      Serial.printf("%s: I2C read failed at 0x%02X - falling back to simulation\n",
-                    c->id, c->addr);
-      c->present = false;
+    bool ok;
+    if (c->addr == MIRROR_ADDR) {
+      // Replay the real channel's sample. Its detector is a separate instance,
+      // so it keeps its own baseline and refractory state, but the input is
+      // identical -- which is why its agreement proves nothing.
+      ok = real_ok;
+      mag = real_mag;
+    } else if (c->present) {
+      ok = mpu_read_mag(c->addr, &mag);
+      real_ok = ok;
+      real_mag = mag;
+    } else if (SIM_ENABLED) {
+      ok = sim_read_mag(c, &mag);
+    } else {
+      continue;                          // no sensor, no data. Never invent it.
+    }
+    if (!ok) {
+      // Say so. A silent fallback is the worst outcome here: the channel keeps
+      // publishing plausible values that are not measurements, and nothing
+      // downstream can tell the difference.
+      if (c->addr != MIRROR_ADDR) {
+        Serial.printf("%s: I2C read failed at 0x%02X\n", c->id, c->addr);
+        c->present = false;
+      }
       continue;                         // never publish garbage
     }
 

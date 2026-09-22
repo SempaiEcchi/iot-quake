@@ -148,6 +148,10 @@ LED    ──────  GPIO2   (onboard na FNK0090)
 Buzzer ──────  GPIO25
 ```
 
+![Node na breadboardu](docs/img/node-breadboard.jpeg)
+
+*Slika 1: Sastavljeni node. FREENOVE FNK0090 (ESP32-WROOM) preko dvije spojene half-size breadboard pločice, GY-521 (MPU6050) lijevo, aktivni buzzer na zasebnoj pločici desno, drugi GY-521 dolje pripremljen za channel B na adresi `0x69`. Napajanje preko USB-C.*
+
 Tijekom izrade dokumentirano je nekoliko empirijskih činjenica koje se ne vide iz datasheeta: FNK0090 ima 40 pinova (ne 38), buzzer je **active-LOW**, a MPU6050 treba ~100 ms nakon power-upa prije prvog I2C upita, inače svaki boot lažno prijavljuje "NO SENSOR". Za dijagnostiku su napisani zasebni sketchevi (`i2c_scan`, `i2c_diag`, `pin_sweep`, `buzzer_test`, `calibrate`).
 
 ---
@@ -241,7 +245,17 @@ Correlator ujedno iz peak akceleracije izračunava **estimated** shindo (tablica
 - countere: eventi, alarmi i **rejected** eventi — svaki event koji nije postao dio alarma bio bi na single-channel dizajnu false alarm, što je headline brojka rada,
 - oznaku "simulated" za channele s prefiksom `sim-`, `mock-` ili `mirror-`.
 
+![Dashboard uživo, 22. 9. 2026.](docs/img/dashboard-2026-09-22.png)
+
+*Slika 2: Dashboard tijekom demo sessiona 22. 9. 2026. Stvarni node `node-fc1280` i mirror channel `mirror-fc1280` (označen kao *simulated*) na istom ESP32. Vidljivi su alarm banner s estimated shindom, earthquake log, counteri i trace po channelu.*
+
+Screenshot ilustrira i dvije stvari koje vrijedi pošteno pročitati. Prvo, brojač *single-channel events rejected* (2) je headline brojka: svaki od tih eventa bio bi na single-channel dizajnu false alarm. Drugo, prvi zapis u logu (961 gal, "shindo 7" u 15:54:32) nije potres nego **boot artefakt**: nakon reseta baseline se seeda prije nego što senzor da valjan sample, pa skok 0 → 980 gal prođe kao event iako je warm-up od 3 s aktivan. Alarm je nastao jer mirror channel po konstrukciji ponavlja isti sample. To je točno vrsta laži koju prefiks `mirror-` čini vidljivom, i ujedno otvoreni bug (seedati baseline tek kad je `|mag|` blizu 980 gal). Ostali alarmi (8–17 gal, shindo 4) su ručno tresenje stola.
+
 Thingsboard je spojen iza `docker compose --profile cloud` za slučaj da rubrika zahtijeva imenovanu IoT platformu, ali ništa o njemu ne ovisi.
+
+![Thingsboard telemetrija](docs/img/thingsboard-2026-08-21.png)
+
+*Slika 3: Thingsboard (lokalni Docker, `--profile cloud`), device `quake-net`, tab Latest telemetry. Correlator forwarda alarm polja (`alarm_shindo`, `alarm_peak_gal`, `alarm_nodes`, `alarm_node_count`, `alarm_at`) i telemetriju po channelu (`dev_gal_<node>`). Polje `alarm_magnitude` namjerno nosi tekst `n/a - needs epicentre distance` umjesto broja ili prazne ćelije.*
 
 ---
 

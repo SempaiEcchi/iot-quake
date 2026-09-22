@@ -142,6 +142,9 @@ Stated up front rather than buried.
 
 ## Documentation
 
+- [SEMINAR.md](SEMINAR.md) — seminar paper (Croatian): motivation, theory, architecture,
+  firmware, correlator, testing, measured results, lessons learned, limitations
+- [SEMINAR.pptx](SEMINAR.pptx) — 12-slide presentation of the same
 - [TESTING.md](TESTING.md) — run and debug the whole system on your laptop, no hardware
 - [Design](docs/superpowers/specs/2026-07-30-esp32-quake-node-design.md) — architecture,
   detection algorithm, error handling, and every feature deliberately cut
